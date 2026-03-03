@@ -1,0 +1,20 @@
+[global]
+   workgroup = WORKGROUP
+   server string = Samba Server
+   map to guest = Bad User
+
+{% for s in shares %}
+[{{ s.name }}]
+   path = {{ s.path }}
+   browseable = {{ 'yes' if s.browseable else 'no' }}
+   read only = {{ 'yes' if s.read_only else 'no' }}
+   writable = {{ 'no' if s.read_only else 'yes' }}
+   guest ok = {{ 'yes' if s.guest_ok else 'no' }}
+{% if s.valid_users %}
+   valid users = {{ s.valid_users }}
+{% endif %}
+{% if s.write_list %}
+   write list = {{ s.write_list }}
+{% endif %}
+
+{% endfor %}

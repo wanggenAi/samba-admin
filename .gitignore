@@ -1,0 +1,34 @@
+# ========================
+# Python
+# ========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+.env
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# ========================
+# FastAPI / Backend data
+# ========================
+backend/data/versions/*
+backend/data/model.json
+
+# ========================
+# Node / Frontend
+# ========================
+node_modules/
+dist/
+frontend/dist/
+frontend/node_modules/
+
+# ========================
+# VSCode
+# ========================
+.vscode/
