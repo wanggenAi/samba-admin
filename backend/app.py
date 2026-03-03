@@ -35,6 +35,18 @@ class ConfigModel(BaseModel):
 
 app = FastAPI(title="Samba Admin API")
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+DIST_DIR = APP_DIR / "dist"
+
+if DIST_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_spa():
+        return FileResponse(str(DIST_DIR / "index.html"))
+
 def run(cmd: List[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
