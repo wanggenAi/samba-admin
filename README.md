@@ -23,20 +23,9 @@ systemctl / testparm
         ↓
 Samba (smbd)
 
-### Development Mode
-- Frontend runs on Vite dev server (5173)
-- Backend runs on Ubuntu (8000)
-- Vite proxy forwards `/api` requests
-
-### Production Mode
-- Frontend is built to static files
-- FastAPI serves frontend + API on port 8000
-
 ---
 
 ## 🖥 Environment Requirements
-
-Recommended:
 
 - Ubuntu 24.04 LTS
 - Python 3.10+
@@ -50,8 +39,6 @@ Recommended:
 sudo apt update
 sudo apt install samba -y
 
-Start and enable Samba:
-
 sudo systemctl enable smbd
 sudo systemctl start smbd
 
@@ -59,24 +46,17 @@ Check status:
 
 systemctl status smbd
 
-Default configuration file:
+Config file:
 
 /etc/samba/smb.conf
 
-Test configuration:
+Test config:
 
 testparm
 
 ---
 
-# 2️⃣ Clone Project
-
-git clone https://github.com/YOUR_GITHUB_USERNAME/samba-admin.git
-cd samba-admin
-
----
-
-# 3️⃣ Backend Setup (Ubuntu)
+# 2️⃣ Backend Setup (Ubuntu)
 
 cd backend
 
@@ -87,63 +67,43 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-Start backend (important: use sudo for systemctl access):
-
-sudo -E python -m uvicorn app:app --host 0.0.0.0 --port 8000
-
-Backend API documentation:
-
-http://SERVER_IP:8000/docs
-
 ---
 
-# 4️⃣ Frontend Development (Local Machine)
+# 3️⃣ Frontend Build (Mac or Dev Machine)
 
 cd frontend
 npm install
-
-Create environment file:
-
-frontend/.env.development
-
-VITE_API_TARGET=http://SERVER_IP:8000
-
-Start development server:
-
-npm run dev
-
-Open in browser:
-
-http://localhost:5173
-
----
-
-# 5️⃣ Production Deployment (Single-Port Mode – No Nginx Required)
-
-## Step 1: Build frontend
-
-cd frontend
 npm run build
 
 This generates:
 
 frontend/dist/
 
-## Step 2: Copy dist to backend
+Copy dist to server:
 
 scp -r dist user@SERVER_IP:~/samba-admin/backend/
 
-## Step 3: Serve frontend with FastAPI
+---
 
-Add in backend/app.py:
+# 4️⃣ Serve Frontend via FastAPI
+
+In backend/app.py add:
 
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 DIST_DIR = APP_DIR / "dist"
-if DIST_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="spa")
 
-Restart backend:
+if DIST_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(DIST_DIR / "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_spa():
+        return FileResponse(str(DIST_DIR / "index.html"))
+
+---
+
+# 5️⃣ Run Backend Manually
 
 sudo -E python -m uvicorn app:app --host 0.0.0.0 --port 8000
 
@@ -153,25 +113,66 @@ http://SERVER_IP:8000
 
 ---
 
+# 6️⃣ Deploy Backend as System Service (Recommended)
+
+Create systemd service file:
+
+sudo nano /etc/systemd/system/samba-admin.service
+
+Paste:
+
+[Unit]
+Description=Samba Admin FastAPI Service
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/home/YOUR_USER/samba-admin/backend
+ExecStart=/home/YOUR_USER/samba-admin/backend/.venv/bin/python -m uvicorn app:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+Reload systemd:
+
+sudo systemctl daemon-reload
+
+Enable service:
+
+sudo systemctl enable samba-admin
+
+Start service:
+
+sudo systemctl start samba-admin
+
+Check status:
+
+sudo systemctl status samba-admin
+
+Now backend will automatically start on boot.
+
+---
+
 # 🔐 Permissions Note
 
-The backend needs permission to:
+Backend requires permission to:
 
 - Modify /etc/samba/smb.conf
 - Execute systemctl reload smbd
 - Run testparm
 
-Therefore backend must be started with sudo.
+Service must run as root.
 
 ---
 
-# 📁 Data & Versioning
+# 📁 Version Backups
 
-Configuration backups are stored in:
+Stored in:
 
 backend/data/versions/
 
-Each apply operation creates a backup for rollback.
+Each apply creates a backup.
 
 ---
 
@@ -180,8 +181,8 @@ Each apply operation creates a backup for rollback.
 - Service status monitoring
 - Safe config validation
 - Automatic reload
-- Configuration backup
-- Clean and lightweight UI
+- Config backup
+- Lightweight UI
 
 ---
 
