@@ -1,125 +1,56 @@
 <template>
-  <div class="container">
-    <h2>Samba Admin Console</h2>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">Samba Admin Console</div>
 
-    <section class="card">
-      <div class="row">
-        <button @click="loadStatus">Refresh Status</button>
-        <span>Service: <b>{{ status.service }}</b></span>
-        <span>Status: <b>{{ status.raw }}</b></span>
-        <span :class="status.active ? 'ok' : 'bad'">
-          ● {{ status.active ? 'Running' : 'Stopped' }}
-        </span>
-      </div>
-    </section>
+      <nav class="nav">
+        <RouterLink to="/dashboard">Dashboard</RouterLink>
+        <RouterLink to="/config">Config</RouterLink>
+        <RouterLink to="/versions">Versions</RouterLink>
+      </nav>
+    </header>
 
-    <section class="card">
-      <h3>Configuration</h3>
-
-      <div class="row">
-        <button @click="validate">Validate Config</button>
-        <button @click="apply">Apply Config</button>
-      </div>
-
-      <textarea
-        :value="output"
-        rows="14"
-        readonly
-        placeholder="Output will appear here..."
-      ></textarea>
-    </section>
+    <main class="main">
+      <RouterView />
+    </main>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from "vue";
-
-const status = reactive({
-  service: "smbd",
-  active: false,
-  raw: "unknown"
-});
-
-const output = ref("");
-
-const payload = {
-  shares: [
-    {
-      name: "testshare",
-      path: "/data/testshare",
-      browseable: true,
-      read_only: false,
-      guest_ok: true
-    }
-  ]
-};
-
-async function loadStatus() {
-  const res = await fetch("/api/system/status");
-  const data = await res.json();
-  status.service = data.service;
-  status.active = data.active;
-  status.raw = data.raw;
-}
-
-async function validate() {
-  const res = await fetch("/api/config/validate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  output.value = JSON.stringify(await res.json(), null, 2);
-}
-
-async function apply() {
-  const res = await fetch("/api/config/apply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  output.value = JSON.stringify(await res.json(), null, 2);
-}
-
-onMounted(loadStatus);
+import { RouterLink, RouterView } from "vue-router";
 </script>
 
-<style>
-.container {
-  max-width: 900px;
-  margin: 30px auto;
+<style scoped>
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
   font-family: Arial, sans-serif;
 }
-
-.card {
-  border: 1px solid #ddd;
-  padding: 16px;
-  margin-bottom: 20px;
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 12px;
+  border-bottom: 1px solid #eee;
+}
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+}
+.nav {
+  display: flex;
+  gap: 10px;
+}
+.nav a {
+  text-decoration: none;
+  color: #333;
+  padding: 6px 10px;
   border-radius: 8px;
 }
-
-.row {
-  display: flex;
-  gap: 16px;
-  align-items: center;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
+.nav a.router-link-active {
+  background: #efefef;
 }
-
-textarea {
-  width: 100%;
-  font-family: ui-monospace, Menlo, monospace;
-}
-
-button {
-  padding: 6px 12px;
-  cursor: pointer;
-}
-
-.ok {
-  color: green;
-}
-
-.bad {
-  color: red;
+.main {
+  padding: 12px;
 }
 </style>
