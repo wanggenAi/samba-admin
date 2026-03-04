@@ -1,10 +1,11 @@
 from fastapi import APIRouter
-from ..services.samba import list_versions, rollback_version
+
+from ..services.samba_service import list_versions, rollback_version
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("/")
 def versions():
     return list_versions()
 

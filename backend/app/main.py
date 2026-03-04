@@ -1,24 +1,35 @@
 from fastapi import FastAPI
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import system, config, versions
-
-app = FastAPI(
-    title="Samba Admin API",
-    version="1.0.0"
-)
-
-# 注册路由
-app.include_router(system.router, prefix="/api/system", tags=["system"])
-app.include_router(config.router, prefix="/api/config", tags=["config"])
-app.include_router(versions.router, prefix="/api/versions", tags=["versions"])
+from .routers import system, config, versions, ldap
 
 
-# ===== 静态前端 (dist) =====
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="Samba Admin API (AD DC)",
+        version="1.0.0",
+    )
 
-APP_DIR = Path(__file__).resolve().parent
-DIST_DIR = APP_DIR.parent / "dist"
+    # CORS：开发阶段允许前端访问（生产再收紧）
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-if DIST_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="frontend")
+    # Routers
+    app.include_router(system.router, prefix="/api/system", tags=["system"])
+    app.include_router(config.router, prefix="/api/config", tags=["config"])
+    app.include_router(versions.router, prefix="/api/versions", tags=["versions"])
+    app.include_router(ldap.router, prefix="/api/ldap", tags=["ldap"])
+
+    @app.get("/health")
+    def health():
+        return {"ok": True, "mode": "ad-dc"}
+
+    return app
+
+
+app = create_app()

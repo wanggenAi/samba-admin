@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from ..services.samba import get_service_status
+from ..services.samba_service import get_service_status
 
 router = APIRouter()
 

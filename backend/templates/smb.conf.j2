@@ -1,20 +1,26 @@
 [global]
-   workgroup = WORKGROUP
-   server string = Samba Server
-   map to guest = Bad User
+   server role = active directory domain controller
+   workgroup = EVMS
+   realm = EVMS.BSTU.EDU
+
+   # 建议：AD DC 用内部 DNS
+   dns forwarder = 8.8.8.8
+   idmap_ldb:use rfc2307 = yes
+
+   # 兼容性
+   server string = Samba AD DC
+   security = user
 
 {% for s in shares %}
 [{{ s.name }}]
    path = {{ s.path }}
-   browseable = {{ 'yes' if s.browseable else 'no' }}
-   read only = {{ 'yes' if s.read_only else 'no' }}
-   writable = {{ 'no' if s.read_only else 'yes' }}
-   guest ok = {{ 'yes' if s.guest_ok else 'no' }}
+   browseable = {{ "yes" if s.browseable else "no" }}
+   read only = {{ "yes" if s.read_only else "no" }}
+   guest ok = {{ "yes" if s.guest_ok else "no" }}
 {% if s.valid_users %}
    valid users = {{ s.valid_users }}
 {% endif %}
 {% if s.write_list %}
    write list = {{ s.write_list }}
 {% endif %}
-
 {% endfor %}

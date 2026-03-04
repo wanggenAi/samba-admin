@@ -1,6 +1,7 @@
 from fastapi import APIRouter
+
 from ..models.schema import ConfigModel
-from ..services.samba import validate_config, apply_config
+from ..services.samba_service import validate_config, apply_config
 
 router = APIRouter()
 
