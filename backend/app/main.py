@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import system, config, versions, ldap
+from .routers import system, config, versions, ldap, users
 
 
 def create_app() -> FastAPI:
@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(config.router, prefix="/api/config", tags=["config"])
     app.include_router(versions.router, prefix="/api/versions", tags=["versions"])
     app.include_router(ldap.router, prefix="/api/ldap", tags=["ldap"])
+    app.include_router(users.router, prefix="/api/users", tags=["users"])
 
     @app.get("/health")
     def health():
