@@ -40,6 +40,11 @@ class SambaSettings(BaseModel):
         os.getenv("APP_VERSIONS_DIR", str(Path(__file__).resolve().parents[1] / "data" / "versions"))
     )
 
+    # Jinja2 模板目录（默认 backend/templates）
+    templates_dir: Path = Path(
+        os.getenv("SAMBA_TEMPLATES_DIR", str(Path(__file__).resolve().parents[2] / "templates"))
+    )
+
     # 临时生成配置文件位置
     tmp_conf_path: Path = Path(os.getenv("SAMBA_TMP_CONF", "/tmp/smb.conf.generated"))
 
