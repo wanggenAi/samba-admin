@@ -24,7 +24,11 @@ async function request(path, options = {}) {
             (typeof data === "string" && data.trim() ? data : null) ||
             (data && typeof data === "object" ? JSON.stringify(data) : null) ||
             `HTTP ${res.status}`;
-        throw new Error(message);
+        const err = new Error(message);
+        err.status = res.status;
+        err.detail = detail;
+        err.data = data;
+        throw err;
     }
 
     return data;

@@ -14,26 +14,32 @@
         <label>
           Username
           <input v-model.trim="form.username" type="text" placeholder="u10001" />
+          <span v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</span>
         </label>
         <label>
           Password
           <input v-model="form.password" type="password" placeholder="Test@123456" />
+          <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
         </label>
         <label>
           Student ID
           <input v-model.trim="form.student_id" type="text" placeholder="2026001" />
+          <span v-if="fieldErrors.student_id" class="field-error">{{ fieldErrors.student_id }}</span>
         </label>
         <label>
           Russian Name
           <input v-model.trim="form.russian_name" type="text" placeholder="Иван Иванов" />
+          <span v-if="fieldErrors.russian_name" class="field-error">{{ fieldErrors.russian_name }}</span>
         </label>
         <label>
           Pinyin Name
           <input v-model.trim="form.pinyin_name" type="text" placeholder="Zhang San" />
+          <span v-if="fieldErrors.pinyin_name" class="field-error">{{ fieldErrors.pinyin_name }}</span>
         </label>
         <label>
           Paid Flag (optional)
           <input v-model.trim="form.paid_flag" type="text" placeholder="$" maxlength="1" />
+          <span v-if="fieldErrors.paid_flag" class="field-error">{{ fieldErrors.paid_flag }}</span>
         </label>
       </div>
 
@@ -80,6 +86,7 @@
             No groups matched.
           </div>
         </div>
+        <span v-if="fieldErrors.groups" class="field-error">{{ fieldErrors.groups }}</span>
       </div>
 
       <p v-if="submitMessage" class="ok">{{ submitMessage }}</p>
@@ -103,7 +110,7 @@
       </div>
 
       <div class="table-wrap">
-        <table>
+        <table class="user-table">
           <thead>
             <tr>
               <th>Username</th>
@@ -114,12 +121,12 @@
           </thead>
           <tbody>
             <tr v-for="u in paginatedUsers" :key="u.dn">
-              <td>{{ u.sAMAccountName || "-" }}</td>
+              <td class="mono">{{ u.sAMAccountName || "-" }}</td>
               <td>{{ u.displayName || "-" }}</td>
-              <td>{{ u.userPrincipalName || "-" }}</td>
+              <td class="mono">{{ u.userPrincipalName || "-" }}</td>
               <td class="dn">{{ u.dn }}</td>
             </tr>
-            <tr v-if="!filteredUsers.length">
+            <tr v-if="!filteredUsers.length" class="empty-row">
               <td colspan="4" class="muted">No users found.</td>
             </tr>
           </tbody>
@@ -127,10 +134,12 @@
       </div>
 
       <div class="pager" v-if="filteredUsers.length">
-        <div class="pager-left muted">
-          Total {{ filteredUsers.length }} users
+        <div class="pager-block pager-summary">
+          <span class="muted">Total</span>
+          <strong>{{ filteredUsers.length }}</strong>
+          <span class="muted">users</span>
         </div>
-        <div class="pager-right">
+        <div class="pager-block pager-size">
           <label>
             Page size
             <select v-model.number="pageSize">
@@ -139,10 +148,12 @@
               <option :value="50">50</option>
             </select>
           </label>
+        </div>
 
-          <button class="btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
-          <span class="muted">Page {{ currentPage }} / {{ totalPages }}</span>
-          <button class="btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
+        <div class="pager-block pager-nav">
+          <button class="btn pager-btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
+          <span class="page-indicator">Page {{ currentPage }} / {{ totalPages }}</span>
+          <button class="btn pager-btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
         </div>
       </div>
 
@@ -161,6 +172,7 @@ const loadingUsers = ref(false);
 const loadingGroups = ref(false);
 const submitting = ref(false);
 const error = ref("");
+const fieldErrors = ref({});
 const submitMessage = ref("");
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
@@ -275,6 +287,7 @@ async function refreshGroups() {
 async function submit() {
   submitting.value = true;
   error.value = "";
+  fieldErrors.value = {};
   submitMessage.value = "";
 
   try {
@@ -288,7 +301,24 @@ async function submit() {
     submitMessage.value = `Success: ${res.username} (${res.created ? "created" : "updated"}).`;
     await refreshUsers();
   } catch (e) {
-    error.value = e?.message || String(e);
+    const detail = e?.detail;
+    if (Array.isArray(detail)) {
+      const nextFieldErrors = {};
+      for (const item of detail) {
+        const path = Array.isArray(item?.loc) ? item.loc : [];
+        const field = path[0] === "body" ? path[path.length - 1] : null;
+        if (!field || nextFieldErrors[field]) continue;
+        nextFieldErrors[field] = item?.msg || "Invalid value";
+      }
+
+      if (Object.keys(nextFieldErrors).length) {
+        fieldErrors.value = nextFieldErrors;
+      } else {
+        error.value = e?.message || String(e);
+      }
+    } else {
+      error.value = e?.message || String(e);
+    }
   } finally {
     submitting.value = false;
   }
@@ -411,28 +441,103 @@ input {
   height: 16px;
   line-height: 16px;
 }
-.table-wrap { overflow: auto; }
-table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
-.dn { max-width: 400px; word-break: break-all; }
+.table-wrap {
+  overflow: auto;
+  border: 1px solid #eceff3;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+}
+.user-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.user-table th,
+.user-table td {
+  border-bottom: 1px solid #edf0f3;
+  padding: 11px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+.user-table th {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  background: #f8fafc;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.user-table tbody tr:hover {
+  background: #f8fbff;
+}
+.user-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.dn {
+  max-width: 420px;
+  word-break: break-all;
+  color: #334155;
+}
+.empty-row td {
+  text-align: center;
+  padding: 20px 12px;
+}
 .pager {
-  margin-top: 10px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
-.pager-right {
+.pager-block {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+.pager-summary {
+  min-width: 150px;
+}
+.pager-summary strong {
+  font-size: 20px;
+  line-height: 1;
+  color: #0f172a;
+}
+.pager-size label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #334155;
+}
+.pager-nav {
+  margin-left: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 4px;
+  gap: 6px;
+  background: #f8fafc;
+}
+.pager-btn {
+  min-width: 72px;
+  background: #fff;
+}
+.page-indicator {
+  font-size: 14px;
+  color: #475569;
+  padding: 0 6px;
+}
 select {
-  border: 1px solid #ddd;
+  border: 1px solid #d2d8e0;
   border-radius: 8px;
   padding: 6px 8px;
-  margin-left: 4px;
+  margin-left: 0;
+  background: #fff;
 }
 .error {
   color: #b00020;
@@ -441,6 +546,11 @@ select {
   padding: 8px;
   border-radius: 8px;
   white-space: pre-wrap;
+}
+.field-error {
+  color: #b00020;
+  font-size: 12px;
+  line-height: 1.3;
 }
 .ok {
   color: #14532d;
@@ -463,6 +573,31 @@ select {
   .search-input {
     width: 100%;
     max-width: none;
+  }
+  .user-table th,
+  .user-table td {
+    padding: 10px;
+  }
+  .pager {
+    align-items: stretch;
+  }
+  .pager-summary {
+    min-width: 0;
+  }
+  .pager-size {
+    width: 100%;
+  }
+  .pager-size label {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .pager-nav {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+  .page-indicator {
+    margin: 0 auto;
   }
 }
 </style>
