@@ -139,7 +139,14 @@ def _ensure_group_memberships(username: str, groups: list[str]) -> list[str]:
     for g in groups:
         _ensure_group_exists(g)
         p = _run(["samba-tool", "group", "addmembers", g, username])
-        if p.returncode != 0 and "already a member" not in p.output.lower():
+
+        normalized = p.output.lower()
+        already_member = (
+            "already a member" in normalized
+            or "already set via primarygroupid" in normalized
+        )
+
+        if p.returncode != 0 and not already_member:
             raise HTTPException(
                 status_code=500,
                 detail={"stage": "add_group_membership", "group": g, "output": p.output},
