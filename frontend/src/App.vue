@@ -7,6 +7,7 @@
         <RouterLink to="/dashboard">Dashboard</RouterLink>
         <RouterLink to="/config">Config</RouterLink>
         <RouterLink to="/versions">Versions</RouterLink>
+        <RouterLink to="/users">Users</RouterLink>
       </nav>
     </header>
 

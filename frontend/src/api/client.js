@@ -17,9 +17,12 @@ async function request(path, options = {}) {
 
     if (!res.ok) {
         // normalize error
+        const detail = data && data.detail;
         const message =
-            (data && data.detail) ||
-            (typeof data === "string" ? data : JSON.stringify(data)) ||
+            (typeof detail === "string" && detail.trim() ? detail : null) ||
+            (detail && typeof detail === "object" ? JSON.stringify(detail) : null) ||
+            (typeof data === "string" && data.trim() ? data : null) ||
+            (data && typeof data === "object" ? JSON.stringify(data) : null) ||
             `HTTP ${res.status}`;
         throw new Error(message);
     }
@@ -52,5 +55,20 @@ export function apiListVersions() {
 export function apiRollbackVersion(vid) {
     return request(`/api/versions/${encodeURIComponent(vid)}/rollback`, {
         method: "POST",
+    });
+}
+
+export function apiListLdapUsers() {
+    return request("/api/ldap/users");
+}
+
+export function apiListLdapGroups() {
+    return request("/api/ldap/groups");
+}
+
+export function apiAddUser(payload) {
+    return request("/api/users", {
+        method: "POST",
+        body: JSON.stringify(payload),
     });
 }
