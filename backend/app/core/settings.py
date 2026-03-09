@@ -88,6 +88,12 @@ class LdapSettings(BaseModel):
     # 根 DN
     base_dn: str = os.getenv("LDAP_BASE_DN", "DC=evms,DC=bstu,DC=edu")
 
+    # 用户默认创建容器；留空时使用 CN=Users,<base_dn>
+    user_container_dn: str | None = os.getenv("LDAP_USER_CONTAINER_DN") or None
+
+    # 用户 UPN 后缀；留空时从 base_dn 推导
+    user_upn_suffix: str | None = os.getenv("LDAP_USER_UPN_SUFFIX") or None
+
     def normalized(self) -> "LdapSettings":
         """
         Small normalization: if use_ssl is True, start_tls should be False.
@@ -95,6 +101,12 @@ class LdapSettings(BaseModel):
         if self.use_ssl and self.start_tls:
             # LDAPS and StartTLS are mutually exclusive; prefer LDAPS if explicitly enabled.
             self.start_tls = False
+        if self.user_container_dn is not None:
+            v = self.user_container_dn.strip()
+            self.user_container_dn = v or None
+        if self.user_upn_suffix is not None:
+            v = self.user_upn_suffix.strip()
+            self.user_upn_suffix = v or None
         return self
 
 

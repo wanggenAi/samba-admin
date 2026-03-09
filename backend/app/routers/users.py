@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
+from ..routers import ldap_guard
 from ..schemas.users import UserAddRequest, UserAddResponse
 from ..services.users import add_or_overwrite_user
 
@@ -10,9 +11,4 @@ router = APIRouter()
 
 @router.post("", response_model=UserAddResponse)
 def add_user(payload: UserAddRequest):
-    try:
-        return add_or_overwrite_user(payload)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return ldap_guard(lambda: add_or_overwrite_user(payload))
