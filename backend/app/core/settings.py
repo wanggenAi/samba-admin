@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -10,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def _bool(val: str | None, default: bool = False) -> bool:
+def _bool(val: Optional[str], default: bool = False) -> bool:
     """
     Parse env boolean values safely.
     Accept: 1/0, true/false, yes/no, y/n, on/off
@@ -89,10 +90,10 @@ class LdapSettings(BaseModel):
     base_dn: str = os.getenv("LDAP_BASE_DN", "DC=evms,DC=bstu,DC=edu")
 
     # 用户默认创建容器；留空时使用 CN=Users,<base_dn>
-    user_container_dn: str | None = os.getenv("LDAP_USER_CONTAINER_DN") or None
+    user_container_dn: Optional[str] = os.getenv("LDAP_USER_CONTAINER_DN") or None
 
     # 用户 UPN 后缀；留空时从 base_dn 推导
-    user_upn_suffix: str | None = os.getenv("LDAP_USER_UPN_SUFFIX") or None
+    user_upn_suffix: Optional[str] = os.getenv("LDAP_USER_UPN_SUFFIX") or None
 
     def normalized(self) -> "LdapSettings":
         """
