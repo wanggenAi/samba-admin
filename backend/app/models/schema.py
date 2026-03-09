@@ -70,4 +70,12 @@ class GroupTreeNode(BaseModel):
     groups: List["GroupTreeNode"] = Field(default_factory=list)
 
 
+class OuTreeNode(BaseModel):
+    dn: str
+    ou: str
+    users: List[LdapUser] = Field(default_factory=list)
+    children: List["OuTreeNode"] = Field(default_factory=list)
+
+
 GroupTreeNode.model_rebuild()
+OuTreeNode.model_rebuild()

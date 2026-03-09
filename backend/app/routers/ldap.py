@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query
 from typing import List, Optional
 
 from app.core.settings import settings
-from app.models.schema import LdapGroup, LdapUser, GroupTreeNode
+from app.models.schema import LdapGroup, LdapUser, GroupTreeNode, OuTreeNode
 from app.routers import ldap_guard
 from app.services import get_ldap_service
 
@@ -41,3 +41,8 @@ def list_users():
 @router.get("/tree", response_model=List[GroupTreeNode])
 def group_tree(root_group: Optional[str] = Query(default=None, description="optional root group cn")):
     return ldap_guard(lambda: get_ldap_service().build_group_tree(root_group_cn=root_group))
+
+
+@router.get("/ou-tree", response_model=List[OuTreeNode])
+def ou_tree():
+    return ldap_guard(lambda: get_ldap_service().build_ou_tree())

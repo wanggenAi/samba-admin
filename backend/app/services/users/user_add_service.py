@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
+from ldap3.core.exceptions import LDAPException
 
 from ...schemas.users import UserAddRequest, UserAddResponse
 from .. import get_ldap_service
@@ -12,11 +13,43 @@ def add_or_overwrite_user(payload: UserAddRequest) -> UserAddResponse:
         user_dn = svc.find_user_dn(conn, payload.username)
         created = False
         password_updated = False
+        target_parent_dn = svc.ensure_ou_path(conn, payload.ou_path) if payload.ou_path else None
+        moved = False
 
         if not user_dn:
-            user_dn = svc.create_user(conn, payload.username, payload.password)
+            user_dn = svc.create_user(conn, payload.username, payload.password, parent_dn=target_parent_dn)
             created = True
         else:
+            if target_parent_dn:
+                try:
+                    next_dn = svc.move_user_to_parent(
+                        conn,
+                        user_dn=user_dn,
+                        username=payload.username,
+                        parent_dn=target_parent_dn,
+                    )
+                except LDAPException as e:
+                    msg = str(e)
+                    if "target DN already exists" in msg:
+                        raise HTTPException(
+                            status_code=409,
+                            detail=(
+                                f"cannot move user '{payload.username}' to OU path "
+                                f"'{'/'.join(payload.ou_path)}': target CN already exists"
+                            ),
+                        )
+                    if "insufficient access rights" in msg:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"insufficient LDAP rights to move user '{payload.username}'",
+                        )
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"failed to move user '{payload.username}' to requested OU path",
+                    )
+
+                moved = next_dn.lower() != user_dn.lower()
+                user_dn = next_dn
             svc.set_user_password(conn, user_dn, payload.password)
             password_updated = True
 
@@ -41,6 +74,8 @@ def add_or_overwrite_user(payload: UserAddRequest) -> UserAddResponse:
             username=payload.username,
             created=created,
             password_updated=password_updated,
+            moved=moved,
+            moved_to_dn=(user_dn if moved else None),
             updated_attributes=updated_attributes,
             groups_added=groups_added,
         )

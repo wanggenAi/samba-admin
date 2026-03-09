@@ -9,7 +9,7 @@ import ldap3
 from ldap3.core.exceptions import LDAPException
 
 from app.core.settings import LdapSettings
-from app.models.schema import GroupTreeNode, LdapGroup, LdapUser
+from app.models.schema import GroupTreeNode, LdapGroup, LdapUser, OuTreeNode
 
 
 class LdapService:
@@ -112,8 +112,55 @@ class LdapService:
             return None
         return self._entry_attr(conn.entries[0], "distinguishedName")
 
-    def create_user(self, conn: ldap3.Connection, username: str, password: str) -> str:
-        user_dn = f"CN={username},{self._users_container_dn()}"
+    def _entry_exists_dn(self, conn: ldap3.Connection, dn: str) -> bool:
+        ok = conn.search(
+            search_base=dn,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.BASE,
+            attributes=["distinguishedName"],
+        )
+        if ok and conn.entries:
+            return True
+
+        result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+        if result_code == 32:
+            return False
+        if result_code in (0,):
+            return False
+        raise LDAPException(f"dn lookup failed: {conn.result}")
+
+    def ensure_ou_path(self, conn: ldap3.Connection, ou_path: List[str]) -> str:
+        """
+        Ensure nested OU exists under base DN.
+        ou_path order: root -> leaf, e.g. ["Students", "ms", "101"].
+        Return leaf DN (or base DN when path is empty).
+        """
+        parent_dn = self.cfg.base_dn
+        for ou_name in ou_path:
+            escaped = ldap3.utils.dn.escape_rdn(ou_name)
+            ou_dn = f"OU={escaped},{parent_dn}"
+            if not self._entry_exists_dn(conn, ou_dn):
+                ok = conn.add(
+                    ou_dn,
+                    object_class=["top", "organizationalUnit"],
+                    attributes={"ou": ou_name},
+                )
+                if not ok:
+                    result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+                    if result_code != 68:  # entryAlreadyExists
+                        raise LDAPException(f"create OU failed: {conn.result}")
+            parent_dn = ou_dn
+        return parent_dn
+
+    def create_user(
+        self,
+        conn: ldap3.Connection,
+        username: str,
+        password: str,
+        parent_dn: Optional[str] = None,
+    ) -> str:
+        target_parent_dn = parent_dn or self._users_container_dn()
+        user_dn = f"CN={ldap3.utils.dn.escape_rdn(username)},{target_parent_dn}"
         user_principal_name = f"{username}@{self._domain_from_base_dn()}"
 
         attributes = {
@@ -136,6 +183,32 @@ class LdapService:
             raise LDAPException(f"enable user failed: {conn.result}")
 
         return user_dn
+
+    def move_user_to_parent(self, conn: ldap3.Connection, user_dn: str, username: str, parent_dn: str) -> str:
+        new_rdn = f"CN={ldap3.utils.dn.escape_rdn(username)}"
+        target_dn = f"{new_rdn},{parent_dn}"
+        if user_dn.lower() == target_dn.lower():
+            return user_dn
+
+        # Pre-check to return clear conflict errors before modify_dn.
+        if self._entry_exists_dn(conn, target_dn):
+            raise LDAPException(f"target DN already exists: {target_dn}")
+
+        ok = conn.modify_dn(
+            dn=user_dn,
+            relative_dn=new_rdn,
+            delete_old_dn=True,
+            new_superior=parent_dn,
+        )
+        if not ok:
+            result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+            if result_code == 68:
+                raise LDAPException(f"target DN already exists: {target_dn}")
+            if result_code == 50:
+                raise LDAPException(f"insufficient access rights to move user: {user_dn}")
+            raise LDAPException(f"move user failed: {conn.result}")
+
+        return target_dn
 
     def set_user_password(self, conn: ldap3.Connection, user_dn: str, password: str) -> None:
         ok = conn.extend.microsoft.modify_password(user=user_dn, new_password=password)
@@ -233,6 +306,90 @@ class LdapService:
                     )
                 )
             return users
+
+    def build_ou_tree(self) -> List[OuTreeNode]:
+        with self.connection() as conn:
+            conn.search(
+                search_base=self.cfg.base_dn,
+                search_filter="(objectClass=organizationalUnit)",
+                attributes=["distinguishedName", "ou"],
+            )
+            ou_entries = list(conn.entries)
+
+            conn.search(
+                search_base=self.cfg.base_dn,
+                search_filter="(&(objectClass=user)(!(objectClass=computer)))",
+                attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName"],
+            )
+            user_entries = list(conn.entries)
+
+        dn_to_node: Dict[str, OuTreeNode] = {}
+        children_by_parent: Dict[str, Set[str]] = {}
+        base_dn_lower = self.cfg.base_dn.lower()
+
+        for entry in ou_entries:
+            dn = str(getattr(entry, "distinguishedName", ""))
+            if not dn:
+                continue
+            ou = str(getattr(entry, "ou", "")) if hasattr(entry, "ou") else ""
+            if not ou and dn.upper().startswith("OU="):
+                ou = dn.split("=", 1)[1].split(",", 1)[0]
+
+            key = dn.lower()
+            dn_to_node[key] = OuTreeNode(dn=dn, ou=ou or dn, users=[], children=[])
+
+            parts = dn.split(",", 1)
+            parent_dn = parts[1] if len(parts) == 2 else ""
+            parent_key = parent_dn.lower()
+            children_by_parent.setdefault(parent_key, set()).add(key)
+
+        for entry in user_entries:
+            user_dn = str(getattr(entry, "distinguishedName", ""))
+            if not user_dn:
+                continue
+            parts = user_dn.split(",", 1)
+            if len(parts) != 2:
+                continue
+            parent_key = parts[1].lower()
+            parent = dn_to_node.get(parent_key)
+            if not parent:
+                continue
+            parent.users.append(
+                LdapUser(
+                    dn=user_dn,
+                    sAMAccountName=str(getattr(entry, "sAMAccountName", "")) if hasattr(entry, "sAMAccountName") else None,
+                    displayName=str(getattr(entry, "displayName", "")) if hasattr(entry, "displayName") else None,
+                    userPrincipalName=str(getattr(entry, "userPrincipalName", "")) if hasattr(entry, "userPrincipalName") else None,
+                )
+            )
+
+        for node in dn_to_node.values():
+            node.users.sort(key=lambda u: (u.sAMAccountName or "").lower())
+
+        root_keys: List[str] = []
+        for key, node in dn_to_node.items():
+            parts = node.dn.split(",", 1)
+            parent_dn = parts[1] if len(parts) == 2 else ""
+            parent_key = parent_dn.lower()
+            if parent_key == base_dn_lower or parent_key not in dn_to_node:
+                root_keys.append(key)
+        root_keys.sort(key=lambda k: (dn_to_node[k].ou or "").lower())
+
+        def build_node(key: str, visited: Set[str]) -> OuTreeNode:
+            src = dn_to_node[key]
+            if key in visited:
+                return OuTreeNode(dn=src.dn, ou=src.ou, users=src.users, children=[])
+
+            next_visited = set(visited)
+            next_visited.add(key)
+            children: List[OuTreeNode] = []
+            for child_key in sorted(children_by_parent.get(key, set()), key=lambda k: (dn_to_node[k].ou or "").lower()):
+                if child_key in dn_to_node:
+                    children.append(build_node(child_key, next_visited))
+
+            return OuTreeNode(dn=src.dn, ou=src.ou, users=src.users, children=children)
+
+        return [build_node(k, set()) for k in root_keys]
 
     # ----------------------------
     # Group Tree (nested groups + users)

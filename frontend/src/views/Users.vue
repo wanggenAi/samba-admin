@@ -43,6 +43,25 @@
         </label>
       </div>
 
+      <div class="ou-picker">
+        <label>
+          OU Path (optional)
+          <input v-model.trim="form.ou_path_text" type="text" placeholder="Students/ms/101" />
+        </label>
+        <div class="ou-quick">
+          <span class="muted">Quick pick:</span>
+          <button
+            v-for="path in ouPathOptions.slice(0, 16)"
+            :key="path"
+            type="button"
+            class="btn mini"
+            @click="applyOuPath(path)"
+          >
+            {{ path }}
+          </button>
+        </div>
+      </div>
+
       <div class="group-picker">
         <label>Groups (multi-select, CN)</label>
 
@@ -159,17 +178,37 @@
 
       <p class="muted">Delete feature will be added next.</p>
     </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>OU Tree</h3>
+        <button class="btn" :disabled="loadingOuTree" @click="refreshOuTree">
+          {{ loadingOuTree ? "Loading..." : "Refresh" }}
+        </button>
+      </div>
+
+      <div v-if="!ouTreeLines.length" class="muted">No OU nodes found under current base DN.</div>
+      <div v-else class="ou-tree-wrap">
+        <div v-for="line in ouTreeLines" :key="line.key" class="ou-row" :style="{ paddingLeft: `${line.depth * 18}px` }">
+          <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
+          <span class="mono">{{ line.text }}</span>
+          <span class="dn muted">{{ line.dn }}</span>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { apiAddUser, apiListLdapGroups, apiListLdapUsers } from "../api/client";
+import { apiAddUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
 
 const users = ref([]);
 const groups = ref([]);
+const ouTree = ref([]);
 const loadingUsers = ref(false);
 const loadingGroups = ref(false);
+const loadingOuTree = ref(false);
 const submitting = ref(false);
 const error = ref("");
 const fieldErrors = ref({});
@@ -189,6 +228,7 @@ const form = ref({
   russian_name: "",
   pinyin_name: "",
   paid_flag: "",
+  ou_path_text: "",
 });
 
 const filteredGroups = computed(() => {
@@ -202,6 +242,46 @@ const hasExactGroup = computed(() => {
   const kw = groupKeyword.value.trim().toLowerCase();
   if (!kw) return false;
   return groups.value.some((g) => (g.cn || "").toLowerCase() === kw);
+});
+
+const ouPathOptions = computed(() => {
+  const out = [];
+  const walk = (nodes, path) => {
+    for (const node of nodes || []) {
+      const currentPath = [...path, node.ou];
+      out.push(currentPath.join("/"));
+      walk(node.children || [], currentPath);
+    }
+  };
+  walk(ouTree.value, []);
+  return out;
+});
+
+const ouTreeLines = computed(() => {
+  const out = [];
+  const walk = (nodes, depth) => {
+    for (const node of nodes || []) {
+      out.push({
+        key: `ou:${node.dn}`,
+        depth,
+        type: "ou",
+        text: node.ou,
+        dn: node.dn,
+      });
+      for (const u of node.users || []) {
+        out.push({
+          key: `user:${u.dn}`,
+          depth: depth + 1,
+          type: "user",
+          text: u.sAMAccountName || u.displayName || u.dn,
+          dn: u.dn,
+        });
+      }
+      walk(node.children || [], depth + 1);
+    }
+  };
+  walk(ouTree.value, 0);
+  return out;
 });
 
 const filteredUsers = computed(() => {
@@ -272,6 +352,18 @@ function goNextPage() {
   }
 }
 
+function parseOuPath(raw) {
+  if (!raw) return [];
+  return raw
+    .split("/")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function applyOuPath(path) {
+  form.value.ou_path_text = path || "";
+}
+
 async function refreshGroups() {
   loadingGroups.value = true;
   error.value = "";
@@ -284,6 +376,18 @@ async function refreshGroups() {
   }
 }
 
+async function refreshOuTree() {
+  loadingOuTree.value = true;
+  error.value = "";
+  try {
+    ouTree.value = await apiListLdapOuTree();
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    loadingOuTree.value = false;
+  }
+}
+
 async function submit() {
   submitting.value = true;
   error.value = "";
@@ -292,14 +396,20 @@ async function submit() {
 
   try {
     const payload = {
-      ...form.value,
+      username: form.value.username,
+      password: form.value.password,
+      student_id: form.value.student_id,
+      russian_name: form.value.russian_name,
+      pinyin_name: form.value.pinyin_name,
       paid_flag: form.value.paid_flag || null,
       groups: selectedGroups.value,
+      ou_path: parseOuPath(form.value.ou_path_text),
     };
 
     const res = await apiAddUser(payload);
-    submitMessage.value = `Success: ${res.username} (${res.created ? "created" : "updated"}).`;
-    await refreshUsers();
+    const movedText = res.moved ? " moved" : "";
+    submitMessage.value = `Success: ${res.username} (${res.created ? "created" : "updated"}${movedText}).`;
+    await Promise.all([refreshUsers(), refreshOuTree()]);
   } catch (e) {
     const detail = e?.detail;
     if (Array.isArray(detail)) {
@@ -326,7 +436,7 @@ async function submit() {
 
 onMounted(async () => {
   document.addEventListener("click", onClickOutside);
-  await Promise.all([refreshUsers(), refreshGroups()]);
+  await Promise.all([refreshUsers(), refreshGroups(), refreshOuTree()]);
 });
 
 onUnmounted(() => {
@@ -386,6 +496,21 @@ input {
   background: #f7f7f7;
 }
 .group-picker { margin-top: 12px; display: grid; gap: 8px; position: relative; }
+.ou-picker {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+.ou-quick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.btn.mini {
+  padding: 4px 8px;
+  font-size: 12px;
+}
 .combo {
   min-height: 42px;
   border: 1px solid #ddd;
@@ -486,6 +611,33 @@ input {
 .empty-row td {
   text-align: center;
   padding: 20px 12px;
+}
+.ou-tree-wrap {
+  border: 1px solid #eceff3;
+  border-radius: 12px;
+  padding: 10px;
+  background: #fbfdff;
+  display: grid;
+  gap: 6px;
+}
+.ou-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  flex-wrap: wrap;
+}
+.tree-tag {
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  border: 1px solid #dbe3ef;
+  color: #334155;
+  background: #eff6ff;
+}
+.tree-tag.user {
+  background: #f8fafc;
 }
 .pager {
   margin-top: 12px;

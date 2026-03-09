@@ -70,6 +70,10 @@ export function apiListLdapGroups() {
     return request("/api/ldap/groups");
 }
 
+export function apiListLdapOuTree() {
+    return request("/api/ldap/ou-tree");
+}
+
 export function apiAddUser(payload) {
     return request("/api/users", {
         method: "POST",

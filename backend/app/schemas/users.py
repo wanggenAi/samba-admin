@@ -13,6 +13,7 @@ class UserAddRequest(BaseModel):
     pinyin_name: str = Field(min_length=1, max_length=128)
     paid_flag: Optional[str] = None
     groups: list[str] = Field(default_factory=list)
+    ou_path: list[str] = Field(default_factory=list)
 
     @field_validator("username")
     @classmethod
@@ -58,11 +59,23 @@ class UserAddRequest(BaseModel):
             out.append(g)
         return out
 
+    @field_validator("ou_path")
+    @classmethod
+    def _normalize_ou_path(cls, values: list[str]) -> list[str]:
+        out: list[str] = []
+        for raw in values:
+            item = raw.strip()
+            if item:
+                out.append(item)
+        return out
+
 
 class UserAddResponse(BaseModel):
     ok: bool = True
     username: str
     created: bool
     password_updated: bool
+    moved: bool = False
+    moved_to_dn: Optional[str] = None
     updated_attributes: list[str] = Field(default_factory=list)
     groups_added: list[str] = Field(default_factory=list)
