@@ -13,18 +13,40 @@
 
     <div class="workspace">
       <section class="panel tree-panel">
-        <div class="panel-head">
-          <h3>OU Tree</h3>
-          <div class="panel-actions">
+        <div class="panel-head tree-head">
+          <div class="tree-head-top">
+            <h3>OU Tree</h3>
+            <div class="tree-tools">
+              <button class="btn tree-tool-btn" :disabled="loadingOuTree" title="Refresh tree" @click="onRefreshTree">
+                {{ loadingOuTree ? "Loading" : "Refresh" }}
+              </button>
+              <button
+                class="btn tree-tool-btn"
+                type="button"
+                :disabled="loadingOuTree || !ouTree.length"
+                title="Expand all OU nodes"
+                @click="onExpandAllOu"
+              >
+                +All
+              </button>
+              <button
+                class="btn tree-tool-btn"
+                type="button"
+                :disabled="loadingOuTree || !ouTree.length"
+                title="Collapse all OU nodes"
+                @click="onCollapseAllOu"
+              >
+                -All
+              </button>
+            </div>
+          </div>
+          <div class="tree-search-row">
             <input
               v-model.trim="ouKeyword"
               type="text"
-              class="search-input"
+              class="search-input tree-search-input"
               placeholder="Search OU / user / DN"
             />
-            <button class="btn" :disabled="loadingOuTree" @click="onRefreshTree">
-              {{ loadingOuTree ? "Loading..." : "Refresh" }}
-            </button>
           </div>
         </div>
 
@@ -33,12 +55,25 @@
           <div
             v-for="line in ouTreeLines"
             :key="line.key"
-            class="ou-row clickable"
-            :class="{ active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase() }"
+            class="ou-row"
+            :class="{
+              clickable: line.type === 'ou',
+              active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase(),
+            }"
             :style="{ paddingLeft: `${line.depth * 18}px` }"
             :title="line.dn"
             @click="onTreeLineClick(line)"
           >
+            <button
+              v-if="line.type === 'ou' && line.hasChildren"
+              type="button"
+              class="tree-toggle"
+              :aria-label="line.expanded ? 'Collapse OU' : 'Expand OU'"
+              @click.stop="onToggleOuExpand(line)"
+            >
+              {{ line.expanded ? "▾" : "▸" }}
+            </button>
+            <span v-else class="tree-toggle-placeholder" aria-hidden="true"></span>
             <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
             <span class="main-text">{{ line.text }}</span>
           </div>
@@ -167,6 +202,7 @@ const currentPage = ref(1);
 const pageSize = ref(10);
 const deletingBatch = ref(false);
 const selectedUsernames = ref([]);
+const expandedOuDns = ref(new Set());
 const protectedUsernames = new Set(["krbtgt"]);
 
 const ouTreeLines = computed(() => {
@@ -187,6 +223,8 @@ const ouTreeLines = computed(() => {
         text: node.ou,
         dn: node.dn,
         path: pathText,
+        hasChildren: (node.children || []).length > 0 || (node.users || []).length > 0,
+        expanded: isOuExpanded(node.dn),
       };
 
       const usersInNode = (node.users || []).map((u) => ({
@@ -206,7 +244,11 @@ const ouTreeLines = computed(() => {
       const matched = nodeHit || userHits.length > 0 || child.matched;
 
       if (matched) {
-        lines.push(nodeLine, ...userHits, ...child.lines);
+        lines.push(nodeLine);
+        const showChildren = kw ? true : nodeLine.expanded;
+        if (showChildren) {
+          lines.push(...userHits, ...child.lines);
+        }
       }
       matchedAny = matchedAny || matched;
     }
@@ -275,6 +317,18 @@ function normalizeDn(dn) {
     .join(",");
 }
 
+function isOuExpanded(dn) {
+  return expandedOuDns.value.has(normalizeDn(dn));
+}
+
+function collectOuDns(nodes, out = []) {
+  for (const node of nodes || []) {
+    out.push(normalizeDn(node.dn));
+    collectOuDns(node.children || [], out);
+  }
+  return out;
+}
+
 function parentDnOfUser(dn) {
   const raw = String(dn || "");
   const idx = raw.indexOf(",");
@@ -323,21 +377,33 @@ function onRefreshTree() {
   refreshOuTree();
 }
 
+function onExpandAllOu() {
+  expandedOuDns.value = new Set(collectOuDns(ouTree.value));
+}
+
+function onCollapseAllOu() {
+  expandedOuDns.value = new Set();
+}
+
 function onTreeLineClick(line) {
-  if (!line) return;
-  if (line.type === "ou") {
-    if (selectedOuDn.value.toLowerCase() === (line.dn || "").toLowerCase()) {
-      clearOuFilter();
-      return;
-    }
-    selectedOuDn.value = line.dn;
-    selectedOuPath.value = line.path || "";
+  if (!line || line.type !== "ou") return;
+  // Switching OU should show that OU's users directly, without stale keyword filter.
+  userKeyword.value = "";
+  if (selectedOuDn.value.toLowerCase() === (line.dn || "").toLowerCase()) {
+    clearOuFilter();
     return;
   }
+  selectedOuDn.value = line.dn;
+  selectedOuPath.value = line.path || "";
+}
 
-  const text = line.text || "";
-  if (text) userKeyword.value = text;
-  if (line.path) selectedOuPath.value = line.path;
+function onToggleOuExpand(line) {
+  if (!line || line.type !== "ou" || !line.hasChildren) return;
+  const dn = normalizeDn(line.dn);
+  const next = new Set(expandedOuDns.value);
+  if (next.has(dn)) next.delete(dn);
+  else next.add(dn);
+  expandedOuDns.value = next;
 }
 
 function toggleSelectUser(username, checked) {
@@ -414,7 +480,17 @@ async function refreshOuTree() {
   loadingOuTree.value = true;
   error.value = "";
   try {
-    ouTree.value = await apiListLdapOuTree();
+    const nextTree = await apiListLdapOuTree();
+    ouTree.value = nextTree;
+    const allDns = new Set(collectOuDns(nextTree));
+    const nextExpanded = new Set();
+    for (const dn of expandedOuDns.value) {
+      if (allDns.has(dn)) nextExpanded.add(dn);
+    }
+    for (const root of nextTree || []) {
+      nextExpanded.add(normalizeDn(root.dn));
+    }
+    expandedOuDns.value = nextExpanded;
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
@@ -479,7 +555,7 @@ watch(totalPages, (next) => {
 .workspace {
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 2.2fr);
+  grid-template-columns: minmax(255px, 0.66fr) minmax(0, 2.34fr);
   align-items: stretch;
 }
 .panel {
@@ -507,13 +583,7 @@ watch(totalPages, (next) => {
 .tree-panel .panel-head {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 10px;
-}
-.tree-panel .panel-actions {
-  justify-content: stretch;
-}
-.tree-panel .panel-actions > * {
-  width: 100%;
+  gap: 8px;
 }
 .panel-head h3 {
   margin: 0;
@@ -523,6 +593,35 @@ watch(totalPages, (next) => {
 .tree-panel .panel-head h3 {
   font-size: 17px;
   letter-spacing: 0;
+}
+.tree-head-top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.tree-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.tree-tool-btn {
+  height: 24px;
+  min-width: 42px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.tree-search-row {
+  display: block;
+}
+.tree-search-input {
+  width: 100%;
+  max-width: none;
 }
 .list-head {
   align-items: start;
@@ -647,6 +746,27 @@ watch(totalPages, (next) => {
   align-items: center;
   gap: 6px;
   min-height: 20px;
+  cursor: default;
+}
+.tree-toggle {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tree-toggle:hover {
+  background: #e2e8f0;
+}
+.tree-toggle-placeholder {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 .ou-row.clickable {
   cursor: pointer;
@@ -655,6 +775,10 @@ watch(totalPages, (next) => {
 }
 .ou-row.clickable:hover {
   background: #f1f5f9;
+}
+.ou-row:not(.clickable) .main-text {
+  color: #475569;
+  font-weight: 500;
 }
 .ou-row.active {
   background: #e6f0ff;
@@ -713,7 +837,7 @@ select {
 }
 .main-text {
   color: #0f172a;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.1;
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   font-weight: 600;

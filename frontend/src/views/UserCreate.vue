@@ -138,6 +138,19 @@
       <p v-if="submitMessage" class="ok">{{ submitMessage }}</p>
       <p v-if="error" class="error">{{ error }}</p>
     </section>
+
+    <div v-if="submitPhase !== 'idle'" class="submit-mask" role="status" aria-live="polite">
+      <div class="submit-mask-card" :class="{ success: submitPhase === 'success' }">
+        <h4>{{ submitPhase === "success" ? "Success" : "Submitting..." }}</h4>
+        <p>
+          {{
+            submitPhase === "success"
+              ? submitMessage || "User saved successfully."
+              : "Creating or updating user, please wait..."
+          }}
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -155,6 +168,7 @@ const submitting = ref(false);
 const error = ref("");
 const fieldErrors = ref({});
 const submitMessage = ref("");
+const submitPhase = ref("idle");
 
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
@@ -268,6 +282,10 @@ function closeWindow() {
   window.close();
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function onClickOutside(event) {
   const target = event.target;
   if (!target.closest(".group-picker")) groupDropdownOpen.value = false;
@@ -300,6 +318,7 @@ async function refreshOuTree() {
 
 async function submit() {
   submitting.value = true;
+  submitPhase.value = "submitting";
   error.value = "";
   fieldErrors.value = {};
   submitMessage.value = "";
@@ -319,6 +338,8 @@ async function submit() {
     const res = await apiAddUser(payload);
     const movedText = res.moved ? " moved" : "";
     submitMessage.value = `Success: ${res.username} (${res.created ? "created" : "updated"}${movedText}).`;
+    submitPhase.value = "success";
+    await sleep(1400);
 
     // If opened from Users list in a separate window, notify parent and close.
     if (window.opener && !window.opener.closed) {
@@ -334,6 +355,7 @@ async function submit() {
     // Fallback: if opened directly, go back to list page.
     await router.push("/users");
   } catch (e) {
+    submitPhase.value = "idle";
     const detail = e?.detail;
     if (Array.isArray(detail)) {
       const nextFieldErrors = {};
@@ -505,6 +527,35 @@ input {
 }
 .muted {
   color: #777;
+}
+.submit-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(1px);
+  display: grid;
+  place-items: center;
+}
+.submit-mask-card {
+  width: min(92vw, 460px);
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
+}
+.submit-mask-card h4 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+.submit-mask-card p {
+  margin: 0;
+  color: #475569;
+}
+.submit-mask-card.success {
+  border-color: #86efac;
+  background: #f0fdf4;
 }
 @media (max-width: 880px) {
   .grid {
