@@ -84,9 +84,15 @@
         <div class="panel-head list-head">
           <div class="head-left">
             <h3>User List</h3>
-            <div v-if="selectedOuDn" class="active-filter">
-              <span class="muted">OU filter:</span>
-              <code>{{ selectedOuPath || selectedOuDn }}</code>
+            <div class="active-filters">
+              <div v-if="selectedOuDn" class="active-filter">
+                <span class="muted">OU filter:</span>
+                <code>{{ selectedOuPath || selectedOuDn }}</code>
+              </div>
+              <div v-if="selectedGroups.length" class="active-filter">
+                <span class="muted">Group filter:</span>
+                <code>{{ selectedGroups.join(", ") }}</code>
+              </div>
             </div>
           </div>
           <div class="panel-actions list-actions">
@@ -97,6 +103,41 @@
             >
               {{ deletingBatch ? "Deleting..." : `Delete Selected (${selectedUsernames.length})` }}
             </button>
+            <div class="group-filter-inline">
+              <button
+                class="btn"
+                type="button"
+                :disabled="loadingGroups"
+                @click="groupDropdownOpen = !groupDropdownOpen"
+              >
+                {{ loadingGroups ? "Loading groups..." : `Groups (${selectedGroups.length})` }}
+              </button>
+              <div v-if="groupDropdownOpen" class="group-dropdown-panel">
+                <input
+                  v-model.trim="groupKeyword"
+                  type="text"
+                  class="group-search-input"
+                  placeholder="Search groups"
+                />
+                <div class="group-checkbox-list">
+                  <label v-for="g in filteredGroups" :key="g.cn" class="group-option">
+                    <input
+                      type="checkbox"
+                      :checked="selectedGroups.includes(g.cn)"
+                      @change="toggleGroup(g.cn, $event.target.checked)"
+                    />
+                    <span>{{ g.cn }}</span>
+                  </label>
+                  <div v-if="!filteredGroups.length" class="muted">No groups matched.</div>
+                </div>
+                <div class="group-panel-actions">
+                  <button class="btn" type="button" :disabled="!selectedGroups.length" @click="clearGroupFilters">
+                    Clear
+                  </button>
+                  <button class="btn" type="button" @click="groupDropdownOpen = false">Done</button>
+                </div>
+              </div>
+            </div>
             <input
               v-model.trim="userKeyword"
               type="text"
@@ -120,13 +161,15 @@
                     @change="toggleSelectCurrentPage($event.target.checked)"
                   />
                 </th>
-                <th>Username</th>
+                <th class="username-col">Username</th>
                 <th>Display Name</th>
                 <th>Pinyin</th>
                 <th>Student ID</th>
                 <th>Paid</th>
                 <th>UPN</th>
+                <th>Groups</th>
                 <th>DN</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -140,16 +183,37 @@
                     @change="toggleSelectUser(resolveUsername(u), $event.target.checked)"
                   />
                 </td>
-                <td class="mono">{{ u.sAMAccountName || "-" }}</td>
+                <td class="mono username-col" :title="u.sAMAccountName || '-'">{{ u.sAMAccountName || "-" }}</td>
                 <td>{{ u.displayName || "-" }}</td>
                 <td>{{ u.givenName || "-" }}</td>
                 <td class="mono">{{ u.employeeID || "-" }}</td>
                 <td class="mono">{{ u.employeeType || "-" }}</td>
                 <td class="mono">{{ u.userPrincipalName || "-" }}</td>
+                <td>
+                  <div class="group-cell">
+                    <span
+                      v-for="cn in groupsByUser(u)"
+                      :key="`${u.dn}:${cn}`"
+                      class="group-chip"
+                    >
+                      {{ cn }}
+                    </span>
+                    <span v-if="!groupsByUser(u).length" class="muted">-</span>
+                  </div>
+                </td>
                 <td class="dn mono" :title="u.dn">{{ u.dn }}</td>
+                <td>
+                  <button
+                    class="btn"
+                    type="button"
+                    @click.stop="openEditWindow(u)"
+                  >
+                    Edit
+                  </button>
+                </td>
               </tr>
               <tr v-if="!filteredUsers.length" class="empty-row">
-                <td colspan="8" class="muted">No users found.</td>
+                <td colspan="10" class="muted">No users found.</td>
               </tr>
             </tbody>
           </table>
@@ -186,16 +250,21 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { apiDeleteUser, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
+import { apiDeleteUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
 
 const users = ref([]);
+const groups = ref([]);
 const ouTree = ref([]);
 const loadingUsers = ref(false);
+const loadingGroups = ref(false);
 const loadingOuTree = ref(false);
 const error = ref("");
 const actionMessage = ref("");
 const userKeyword = ref("");
 const ouKeyword = ref("");
+const groupKeyword = ref("");
+const selectedGroups = ref([]);
+const groupDropdownOpen = ref(false);
 const selectedOuDn = ref("");
 const selectedOuPath = ref("");
 const currentPage = ref(1);
@@ -259,6 +328,27 @@ const ouTreeLines = computed(() => {
   return collect(ouTree.value, 0, []).lines;
 });
 
+const userGroupMap = computed(() => {
+  const out = new Map();
+  for (const g of groups.value) {
+    const cn = String(g?.cn || "").trim();
+    if (!cn) continue;
+    for (const memberDn of g?.members || []) {
+      const key = normalizeDn(memberDn);
+      if (!key) continue;
+      if (!out.has(key)) out.set(key, new Set());
+      out.get(key).add(cn);
+    }
+  }
+  return out;
+});
+
+const filteredGroups = computed(() => {
+  const kw = groupKeyword.value.toLowerCase();
+  if (!kw) return groups.value.slice(0, 100);
+  return groups.value.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 100);
+});
+
 const filteredUsers = computed(() => {
   let items = users.value;
   if (selectedOuDn.value) {
@@ -269,12 +359,22 @@ const filteredUsers = computed(() => {
     });
   }
 
+  if (selectedGroups.value.length) {
+    const targets = new Set(selectedGroups.value.map((g) => g.toLowerCase()));
+    items = items.filter((u) => {
+      const values = groupsByUser(u).map((g) => g.toLowerCase());
+      if (!values.length) return false;
+      return values.some((g) => targets.has(g));
+    });
+  }
+
   const kw = userKeyword.value.trim().toLowerCase();
   if (!kw) return items;
 
   return items.filter((u) => {
     const ouPath = extractOuPathFromDn(u.dn || "");
-    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath];
+    const groupsText = groupsByUser(u).join(" ");
+    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath, groupsText];
     return fields.some((value) => (value || "").toLowerCase().includes(kw));
   });
 });
@@ -352,8 +452,38 @@ function isProtectedUsername(username) {
   return protectedUsernames.has(String(username).toLowerCase());
 }
 
+function groupsByUser(user) {
+  const key = normalizeDn(user?.dn || "");
+  if (!key) return [];
+  const set = userGroupMap.value.get(key);
+  if (!set) return [];
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
+}
+
+function toggleGroup(cn, checked) {
+  if (!cn) return;
+  if (checked) {
+    if (selectedGroups.value.includes(cn)) return;
+    selectedGroups.value = [...selectedGroups.value, cn];
+    return;
+  }
+  selectedGroups.value = selectedGroups.value.filter((x) => x !== cn);
+}
+
+function clearGroupFilters() {
+  selectedGroups.value = [];
+  groupKeyword.value = "";
+  groupDropdownOpen.value = false;
+}
+
 function openAddWindow() {
   window.open("/users/new", "_blank", "noopener,noreferrer");
+}
+
+function openEditWindow(user) {
+  const username = resolveUsername(user);
+  if (!username) return;
+  window.open(`/users/edit/${encodeURIComponent(username)}`, "_blank", "noopener,noreferrer");
 }
 
 function clearOuFilter() {
@@ -363,11 +493,14 @@ function clearOuFilter() {
 
 function onRefreshUsers() {
   userKeyword.value = "";
+  groupKeyword.value = "";
+  selectedGroups.value = [];
+  groupDropdownOpen.value = false;
   clearOuFilter();
   currentPage.value = 1;
   selectedUsernames.value = [];
   actionMessage.value = "";
-  refreshUsers();
+  refreshAll();
 }
 
 function onRefreshTree() {
@@ -448,7 +581,7 @@ async function onBatchDelete() {
   }
 
   selectedUsernames.value = [];
-  await Promise.all([refreshUsers(), refreshOuTree()]);
+  await refreshAll();
   deletingBatch.value = false;
 
   if (!failed.length) {
@@ -476,6 +609,18 @@ async function refreshUsers() {
   }
 }
 
+async function refreshGroups() {
+  loadingGroups.value = true;
+  error.value = "";
+  try {
+    groups.value = await apiListLdapGroups();
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    loadingGroups.value = false;
+  }
+}
+
 async function refreshOuTree() {
   loadingOuTree.value = true;
   error.value = "";
@@ -498,6 +643,10 @@ async function refreshOuTree() {
   }
 }
 
+async function refreshAll() {
+  await Promise.all([refreshUsers(), refreshGroups(), refreshOuTree()]);
+}
+
 function goPrevPage() {
   if (currentPage.value > 1) currentPage.value -= 1;
 }
@@ -510,19 +659,26 @@ async function onWindowMessage(event) {
   if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== "USER_CREATED_OR_UPDATED") return;
   actionMessage.value = `Saved user: ${event.data.username || "-"}`;
-  await Promise.all([refreshUsers(), refreshOuTree()]);
+  await refreshAll();
+}
+
+function onClickOutside(event) {
+  const target = event.target;
+  if (!target.closest(".group-filter-inline")) groupDropdownOpen.value = false;
 }
 
 onMounted(async () => {
   window.addEventListener("message", onWindowMessage);
-  await Promise.all([refreshUsers(), refreshOuTree()]);
+  document.addEventListener("click", onClickOutside);
+  await refreshAll();
 });
 
 onUnmounted(() => {
   window.removeEventListener("message", onWindowMessage);
+  document.removeEventListener("click", onClickOutside);
 });
 
-watch([userKeyword, selectedOuDn, pageSize], () => {
+watch([userKeyword, selectedOuDn, selectedGroups, pageSize], () => {
   currentPage.value = 1;
 });
 
@@ -685,6 +841,73 @@ watch(totalPages, (next) => {
   background: #f1f5f9;
   width: fit-content;
 }
+.active-filters {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.group-filter-inline {
+  position: relative;
+}
+.group-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(420px, 78vw);
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+  z-index: 10;
+}
+.group-search-input {
+  width: 100%;
+  height: 34px;
+  box-sizing: border-box;
+  border: 1px solid #cfd8e3;
+  border-radius: 8px;
+  padding: 0 10px;
+  outline: none;
+}
+.group-checkbox-list {
+  max-height: 240px;
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+}
+.group-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+.group-option:hover {
+  background: #f8fafc;
+}
+.group-panel-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.group-cell {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: 280px;
+}
+.group-chip {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .table-wrap {
   flex: 1;
   overflow: auto;
@@ -719,6 +942,31 @@ watch(totalPages, (next) => {
 .check-col {
   width: 44px;
   text-align: center !important;
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: #fff;
+}
+.username-col {
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: sticky;
+  left: 44px;
+  z-index: 2;
+  background: #fff;
+}
+.user-table th.check-col,
+.user-table th.username-col {
+  z-index: 5;
+  background: #f8fbff;
+}
+.user-table tbody tr:hover .check-col,
+.user-table tbody tr:hover .username-col {
+  background: #f8fbff;
 }
 .user-table tbody tr:hover {
   background: #f8fbff;
