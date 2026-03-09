@@ -21,7 +21,7 @@ import { RouterLink, RouterView } from "vue-router";
 
 <style scoped>
 .wrap {
-  max-width: 980px;
+  max-width: 1540px;
   margin: 0 auto;
   font-family: Arial, sans-serif;
 }
@@ -50,6 +50,6 @@ import { RouterLink, RouterView } from "vue-router";
   background: #efefef;
 }
 .main {
-  padding: 12px;
+  padding: 16px;
 }
 </style>

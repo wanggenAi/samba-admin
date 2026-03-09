@@ -9,11 +9,12 @@
         </button>
 
         <div class="meta" v-if="status">
-          <span>Service: <b>{{ status.service }}</b></span>
-          <span>Status: <b>{{ status.raw }}</b></span>
-          <span class="dot" :class="{ ok: status.active, bad: !status.active }"></span>
-          <span :class="{ okText: status.active, badText: !status.active }">
-            {{ status.active ? "Running" : "Stopped" }}
+          <span>Directory: <b>LDAP</b></span>
+          <span>Host: <b>{{ status.host }}:{{ status.port }}</b></span>
+          <span>Base DN: <b>{{ status.base_dn }}</b></span>
+          <span class="dot" :class="{ ok: status.ok, bad: !status.ok }"></span>
+          <span :class="{ okText: status.ok, badText: !status.ok }">
+            {{ status.ok ? "Connected" : "Disconnected" }}
           </span>
         </div>
 
@@ -31,7 +32,7 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
-import { apiGetStatus } from "../api/client";
+import { apiLdapHealth } from "../api/client";
 
 const status = ref(null);
 const loading = ref(false);
@@ -41,7 +42,7 @@ async function refresh() {
   error.value = "";
   loading.value = true;
   try {
-    status.value = await apiGetStatus();
+    status.value = await apiLdapHealth();
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {

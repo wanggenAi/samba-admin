@@ -79,3 +79,10 @@ class UserAddResponse(BaseModel):
     moved_to_dn: Optional[str] = None
     updated_attributes: list[str] = Field(default_factory=list)
     groups_added: list[str] = Field(default_factory=list)
+
+
+class UserDeleteResponse(BaseModel):
+    ok: bool = True
+    username: str
+    deleted: bool
+    dn: Optional[str] = None

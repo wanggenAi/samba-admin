@@ -38,6 +38,10 @@ export function apiGetStatus() {
     return request("/api/system/status");
 }
 
+export function apiLdapHealth() {
+    return request("/api/ldap/health");
+}
+
 export function apiValidateConfig(payload) {
     return request("/api/config/validate", {
         method: "POST",
@@ -78,5 +82,11 @@ export function apiAddUser(payload) {
     return request("/api/users", {
         method: "POST",
         body: JSON.stringify(payload),
+    });
+}
+
+export function apiDeleteUser(username) {
+    return request(`/api/users/${encodeURIComponent(username)}`, {
+        method: "DELETE",
     });
 }

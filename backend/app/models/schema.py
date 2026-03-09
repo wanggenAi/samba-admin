@@ -54,6 +54,9 @@ class LdapUser(BaseModel):
     sAMAccountName: Optional[str] = None
     displayName: Optional[str] = None
     userPrincipalName: Optional[str] = None
+    givenName: Optional[str] = None
+    employeeID: Optional[str] = None
+    employeeType: Optional[str] = None
 
 
 class LdapGroup(BaseModel):

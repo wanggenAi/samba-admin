@@ -62,7 +62,9 @@ class LdapService:
         if not hasattr(entry, attr):
             return None
         value = str(getattr(entry, attr, ""))
-        return value if value else None
+        if not value or value == "[]":
+            return None
+        return value
 
     @staticmethod
     def _escape_filter(value: str) -> str:
@@ -215,6 +217,10 @@ class LdapService:
         if not ok:
             raise LDAPException(f"set password failed: {conn.result}")
 
+    def delete_user(self, conn: ldap3.Connection, user_dn: str) -> None:
+        if not conn.delete(user_dn):
+            raise LDAPException(f"delete user failed: {conn.result}")
+
     def update_user_profile(
         self,
         conn: ldap3.Connection,
@@ -224,21 +230,30 @@ class LdapService:
         pinyin_name: str,
         paid_flag: Optional[str],
     ) -> List[str]:
-        changes: Dict[str, List[tuple[int, List[str]]]] = {
+        base_changes: Dict[str, List[tuple[int, List[str]]]] = {
             "displayName": [(ldap3.MODIFY_REPLACE, [russian_name])],
             "givenName": [(ldap3.MODIFY_REPLACE, [pinyin_name])],
             "employeeID": [(ldap3.MODIFY_REPLACE, [student_id])],
         }
 
-        if paid_flag == "$":
-            changes["employeeType"] = [(ldap3.MODIFY_REPLACE, ["$"])]
-        elif paid_flag is None:
-            changes["employeeType"] = [(ldap3.MODIFY_DELETE, [])]
-
-        if not conn.modify(user_dn, changes):
+        if not conn.modify(user_dn, base_changes):
             raise LDAPException(f"update user attributes failed: {conn.result}")
 
-        return list(changes.keys())
+        updated: List[str] = ["displayName", "givenName", "employeeID"]
+
+        if paid_flag == "$":
+            if not conn.modify(user_dn, {"employeeType": [(ldap3.MODIFY_REPLACE, ["$"])]}):
+                raise LDAPException(f"update user attributes failed: {conn.result}")
+            updated.append("employeeType")
+        elif paid_flag is None:
+            if not conn.modify(user_dn, {"employeeType": [(ldap3.MODIFY_DELETE, [])]}):
+                result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+                # noSuchAttribute: employeeType absent is acceptable when clearing paid flag
+                if result_code != 16:
+                    raise LDAPException(f"update user attributes failed: {conn.result}")
+            updated.append("employeeType")
+
+        return updated
 
     def add_user_to_group(self, conn: ldap3.Connection, user_dn: str, group_dn: str) -> None:
         ok = conn.modify(group_dn, {"member": [(ldap3.MODIFY_ADD, [user_dn])]})
@@ -293,16 +308,27 @@ class LdapService:
             conn.search(
                 search_base=self.cfg.base_dn,
                 search_filter="(&(objectClass=user)(!(objectClass=computer)))",
-                attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName"],
+                attributes=[
+                    "distinguishedName",
+                    "sAMAccountName",
+                    "displayName",
+                    "userPrincipalName",
+                    "givenName",
+                    "employeeID",
+                    "employeeType",
+                ],
             )
             users: List[LdapUser] = []
             for e in conn.entries:
                 users.append(
                     LdapUser(
-                        dn=str(getattr(e, "distinguishedName", "")),
-                        sAMAccountName=str(getattr(e, "sAMAccountName", "")) if hasattr(e, "sAMAccountName") else None,
-                        displayName=str(getattr(e, "displayName", "")) if hasattr(e, "displayName") else None,
-                        userPrincipalName=str(getattr(e, "userPrincipalName", "")) if hasattr(e, "userPrincipalName") else None,
+                        dn=self._entry_attr(e, "distinguishedName") or "",
+                        sAMAccountName=self._entry_attr(e, "sAMAccountName"),
+                        displayName=self._entry_attr(e, "displayName"),
+                        userPrincipalName=self._entry_attr(e, "userPrincipalName"),
+                        givenName=self._entry_attr(e, "givenName"),
+                        employeeID=self._entry_attr(e, "employeeID"),
+                        employeeType=self._entry_attr(e, "employeeType"),
                     )
                 )
             return users

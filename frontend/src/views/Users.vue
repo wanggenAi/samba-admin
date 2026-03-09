@@ -1,295 +1,238 @@
 <template>
   <div class="users-page">
-    <h2>Users</h2>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h3>Add User</h3>
-        <button class="btn" :disabled="submitting || loadingUsers" @click="submit">
-          {{ submitting ? "Submitting..." : "Create / Overwrite" }}
-        </button>
+    <header class="page-head">
+      <div>
+        <h2>Users</h2>
+        <p class="sub">Browse OU structure, filter users, and bulk-delete selected accounts.</p>
       </div>
+      <button class="btn primary" type="button" @click="openAddWindow">New User</button>
+    </header>
 
-      <div class="grid">
-        <label>
-          Username
-          <input v-model.trim="form.username" type="text" placeholder="u10001" />
-          <span v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</span>
-        </label>
-        <label>
-          Password
-          <input v-model="form.password" type="password" placeholder="Test@123456" />
-          <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
-        </label>
-        <label>
-          Student ID
-          <input v-model.trim="form.student_id" type="text" placeholder="2026001" />
-          <span v-if="fieldErrors.student_id" class="field-error">{{ fieldErrors.student_id }}</span>
-        </label>
-        <label>
-          Russian Name
-          <input v-model.trim="form.russian_name" type="text" placeholder="Иван Иванов" />
-          <span v-if="fieldErrors.russian_name" class="field-error">{{ fieldErrors.russian_name }}</span>
-        </label>
-        <label>
-          Pinyin Name
-          <input v-model.trim="form.pinyin_name" type="text" placeholder="Zhang San" />
-          <span v-if="fieldErrors.pinyin_name" class="field-error">{{ fieldErrors.pinyin_name }}</span>
-        </label>
-        <label>
-          Paid Flag (optional)
-          <input v-model.trim="form.paid_flag" type="text" placeholder="$" maxlength="1" />
-          <span v-if="fieldErrors.paid_flag" class="field-error">{{ fieldErrors.paid_flag }}</span>
-        </label>
-      </div>
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="actionMessage" class="ok">{{ actionMessage }}</p>
 
-      <div class="ou-picker">
-        <label>
-          OU Path (optional)
-          <input v-model.trim="form.ou_path_text" type="text" placeholder="Students/ms/101" />
-        </label>
-        <div class="ou-quick">
-          <span class="muted">Quick pick:</span>
-          <button
-            v-for="path in ouPathOptions.slice(0, 16)"
-            :key="path"
-            type="button"
-            class="btn mini"
-            @click="applyOuPath(path)"
-          >
-            {{ path }}
-          </button>
-        </div>
-      </div>
-
-      <div class="group-picker">
-        <label>Groups (multi-select, CN)</label>
-
-        <div class="combo" @click="focusGroupInput">
-          <span v-for="cn in selectedGroups" :key="cn" class="chip">
-            {{ cn }}
-            <button class="chip-x" type="button" @click.stop="removeGroup(cn)">×</button>
-          </span>
-
-          <input
-            ref="groupInputRef"
-            v-model.trim="groupKeyword"
-            class="group-input"
-            type="text"
-            placeholder="Type to search or input a group CN, then Enter"
-            @focus="dropdownOpen = true"
-            @keydown.enter.prevent="addTypedGroup"
-            @keydown.esc="dropdownOpen = false"
-          />
-        </div>
-
-        <div v-if="dropdownOpen" class="dropdown">
-          <button
-            v-for="g in filteredGroups"
-            :key="g.cn"
-            type="button"
-            class="dropdown-item"
-            @click="pickGroup(g.cn)"
-          >
-            {{ g.cn }}
-          </button>
-          <button
-            v-if="groupKeyword && !hasExactGroup"
-            type="button"
-            class="dropdown-item create"
-            @click="addTypedGroup"
-          >
-            Use "{{ groupKeyword }}"
-          </button>
-          <div v-if="!filteredGroups.length && !(groupKeyword && !hasExactGroup)" class="muted">
-            No groups matched.
+    <div class="workspace">
+      <section class="panel tree-panel">
+        <div class="panel-head">
+          <h3>OU Tree</h3>
+          <div class="panel-actions">
+            <input
+              v-model.trim="ouKeyword"
+              type="text"
+              class="search-input"
+              placeholder="Search OU / user / DN"
+            />
+            <button class="btn" :disabled="loadingOuTree" @click="onRefreshTree">
+              {{ loadingOuTree ? "Loading..." : "Refresh" }}
+            </button>
           </div>
         </div>
-        <span v-if="fieldErrors.groups" class="field-error">{{ fieldErrors.groups }}</span>
-      </div>
 
-      <p v-if="submitMessage" class="ok">{{ submitMessage }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h3>User List</h3>
-        <div class="panel-actions">
-          <input
-            v-model.trim="userKeyword"
-            type="text"
-            class="search-input"
-            placeholder="Search username / display name / UPN / DN"
-          />
-          <button class="btn" :disabled="loadingUsers" @click="refreshUsers">
-            {{ loadingUsers ? "Loading..." : "Refresh" }}
-          </button>
+        <div v-if="!ouTreeLines.length" class="muted">No OU nodes found under current base DN.</div>
+        <div v-else class="ou-tree-wrap">
+          <div
+            v-for="line in ouTreeLines"
+            :key="line.key"
+            class="ou-row clickable"
+            :class="{ active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase() }"
+            :style="{ paddingLeft: `${line.depth * 18}px` }"
+            :title="line.dn"
+            @click="onTreeLineClick(line)"
+          >
+            <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
+            <span class="main-text">{{ line.text }}</span>
+          </div>
         </div>
-      </div>
+      </section>
 
-      <div class="table-wrap">
-        <table class="user-table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Display Name</th>
-              <th>UPN</th>
-              <th>DN</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="u in paginatedUsers" :key="u.dn">
-              <td class="mono">{{ u.sAMAccountName || "-" }}</td>
-              <td>{{ u.displayName || "-" }}</td>
-              <td class="mono">{{ u.userPrincipalName || "-" }}</td>
-              <td class="dn">{{ u.dn }}</td>
-            </tr>
-            <tr v-if="!filteredUsers.length" class="empty-row">
-              <td colspan="4" class="muted">No users found.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="pager" v-if="filteredUsers.length">
-        <div class="pager-block pager-summary">
-          <span class="muted">Total</span>
-          <strong>{{ filteredUsers.length }}</strong>
-          <span class="muted">users</span>
-        </div>
-        <div class="pager-block pager-size">
-          <label>
-            Page size
-            <select v-model.number="pageSize">
-              <option :value="10">10</option>
-              <option :value="20">20</option>
-              <option :value="50">50</option>
-            </select>
-          </label>
+      <section class="panel list-panel">
+        <div class="panel-head list-head">
+          <div class="head-left">
+            <h3>User List</h3>
+            <div v-if="selectedOuDn" class="active-filter">
+              <span class="muted">OU filter:</span>
+              <code>{{ selectedOuPath || selectedOuDn }}</code>
+            </div>
+          </div>
+          <div class="panel-actions list-actions">
+            <button
+              class="btn danger"
+              :disabled="!selectedUsernames.length || deletingBatch"
+              @click="onBatchDelete"
+            >
+              {{ deletingBatch ? "Deleting..." : `Delete Selected (${selectedUsernames.length})` }}
+            </button>
+            <input
+              v-model.trim="userKeyword"
+              type="text"
+              class="search-input"
+              placeholder="Search username / display name / UPN / DN / OU path"
+            />
+            <button class="btn" :disabled="loadingUsers" @click="onRefreshUsers">
+              {{ loadingUsers ? "Loading..." : "Refresh" }}
+            </button>
+          </div>
         </div>
 
-        <div class="pager-block pager-nav">
-          <button class="btn pager-btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
-          <span class="page-indicator">Page {{ currentPage }} / {{ totalPages }}</span>
-          <button class="btn pager-btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
+        <div class="table-wrap">
+          <table class="user-table">
+            <thead>
+              <tr>
+                <th class="check-col">
+                  <input
+                    type="checkbox"
+                    :checked="allCurrentPageSelected"
+                    @change="toggleSelectCurrentPage($event.target.checked)"
+                  />
+                </th>
+                <th>Username</th>
+                <th>Display Name</th>
+                <th>Pinyin</th>
+                <th>Student ID</th>
+                <th>Paid</th>
+                <th>UPN</th>
+                <th>DN</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="u in paginatedUsers" :key="u.dn">
+                <td class="check-col">
+                  <input
+                    type="checkbox"
+                    :disabled="isProtectedUsername(resolveUsername(u))"
+                    :title="isProtectedUsername(resolveUsername(u)) ? 'Protected account' : ''"
+                    :checked="selectedUsernames.includes(resolveUsername(u))"
+                    @change="toggleSelectUser(resolveUsername(u), $event.target.checked)"
+                  />
+                </td>
+                <td class="mono">{{ u.sAMAccountName || "-" }}</td>
+                <td>{{ u.displayName || "-" }}</td>
+                <td>{{ u.givenName || "-" }}</td>
+                <td class="mono">{{ u.employeeID || "-" }}</td>
+                <td class="mono">{{ u.employeeType || "-" }}</td>
+                <td class="mono">{{ u.userPrincipalName || "-" }}</td>
+                <td class="dn mono" :title="u.dn">{{ u.dn }}</td>
+              </tr>
+              <tr v-if="!filteredUsers.length" class="empty-row">
+                <td colspan="8" class="muted">No users found.</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-      </div>
 
-      <p class="muted">Delete feature will be added next.</p>
-    </section>
+        <div class="pager" v-if="filteredUsers.length">
+          <div class="pager-block pager-summary">
+            <span class="muted">Total</span>
+            <strong>{{ filteredUsers.length }}</strong>
+            <span class="muted">users</span>
+          </div>
 
-    <section class="panel">
-      <div class="panel-head">
-        <h3>OU Tree</h3>
-        <button class="btn" :disabled="loadingOuTree" @click="refreshOuTree">
-          {{ loadingOuTree ? "Loading..." : "Refresh" }}
-        </button>
-      </div>
+          <div class="pager-block pager-size">
+            <label>
+              Page size
+              <select v-model.number="pageSize">
+                <option :value="10">10</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
+          </div>
 
-      <div v-if="!ouTreeLines.length" class="muted">No OU nodes found under current base DN.</div>
-      <div v-else class="ou-tree-wrap">
-        <div v-for="line in ouTreeLines" :key="line.key" class="ou-row" :style="{ paddingLeft: `${line.depth * 18}px` }">
-          <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
-          <span class="mono">{{ line.text }}</span>
-          <span class="dn muted">{{ line.dn }}</span>
+          <div class="pager-block pager-nav">
+            <button class="btn pager-btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
+            <span class="page-indicator">Page {{ currentPage }} / {{ totalPages }}</span>
+            <button class="btn pager-btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { apiAddUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
+import { apiDeleteUser, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
 
 const users = ref([]);
-const groups = ref([]);
 const ouTree = ref([]);
 const loadingUsers = ref(false);
-const loadingGroups = ref(false);
 const loadingOuTree = ref(false);
-const submitting = ref(false);
 const error = ref("");
-const fieldErrors = ref({});
-const submitMessage = ref("");
-const groupKeyword = ref("");
-const selectedGroups = ref([]);
-const dropdownOpen = ref(false);
-const groupInputRef = ref(null);
+const actionMessage = ref("");
 const userKeyword = ref("");
+const ouKeyword = ref("");
+const selectedOuDn = ref("");
+const selectedOuPath = ref("");
 const currentPage = ref(1);
 const pageSize = ref(10);
-
-const form = ref({
-  username: "",
-  password: "",
-  student_id: "",
-  russian_name: "",
-  pinyin_name: "",
-  paid_flag: "",
-  ou_path_text: "",
-});
-
-const filteredGroups = computed(() => {
-  const kw = groupKeyword.value.toLowerCase();
-  const available = groups.value.filter((g) => !selectedGroups.value.includes(g.cn));
-  if (!kw) return available.slice(0, 20);
-  return available.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 20);
-});
-
-const hasExactGroup = computed(() => {
-  const kw = groupKeyword.value.trim().toLowerCase();
-  if (!kw) return false;
-  return groups.value.some((g) => (g.cn || "").toLowerCase() === kw);
-});
-
-const ouPathOptions = computed(() => {
-  const out = [];
-  const walk = (nodes, path) => {
-    for (const node of nodes || []) {
-      const currentPath = [...path, node.ou];
-      out.push(currentPath.join("/"));
-      walk(node.children || [], currentPath);
-    }
-  };
-  walk(ouTree.value, []);
-  return out;
-});
+const deletingBatch = ref(false);
+const selectedUsernames = ref([]);
+const protectedUsernames = new Set(["krbtgt"]);
 
 const ouTreeLines = computed(() => {
-  const out = [];
-  const walk = (nodes, depth) => {
+  const kw = ouKeyword.value.trim().toLowerCase();
+
+  const collect = (nodes, depth, path) => {
+    const lines = [];
+    let matchedAny = false;
+
     for (const node of nodes || []) {
-      out.push({
+      const currentPath = [...path, node.ou];
+      const pathText = currentPath.join("/");
+
+      const nodeLine = {
         key: `ou:${node.dn}`,
         depth,
         type: "ou",
         text: node.ou,
         dn: node.dn,
-      });
-      for (const u of node.users || []) {
-        out.push({
-          key: `user:${u.dn}`,
-          depth: depth + 1,
-          type: "user",
-          text: u.sAMAccountName || u.displayName || u.dn,
-          dn: u.dn,
-        });
+        path: pathText,
+      };
+
+      const usersInNode = (node.users || []).map((u) => ({
+        key: `user:${u.dn}`,
+        depth: depth + 1,
+        type: "user",
+        text: u.sAMAccountName || u.displayName || u.dn,
+        dn: u.dn,
+        path: pathText,
+      }));
+
+      const child = collect(node.children || [], depth + 1, currentPath);
+      const nodeHit = !kw || [nodeLine.text, nodeLine.dn, nodeLine.path].some((v) => (v || "").toLowerCase().includes(kw));
+      const userHits = !kw
+        ? usersInNode
+        : usersInNode.filter((u) => [u.text, u.dn, u.path].some((v) => (v || "").toLowerCase().includes(kw)));
+      const matched = nodeHit || userHits.length > 0 || child.matched;
+
+      if (matched) {
+        lines.push(nodeLine, ...userHits, ...child.lines);
       }
-      walk(node.children || [], depth + 1);
+      matchedAny = matchedAny || matched;
     }
+
+    return { lines, matched: matchedAny };
   };
-  walk(ouTree.value, 0);
-  return out;
+
+  return collect(ouTree.value, 0, []).lines;
 });
 
 const filteredUsers = computed(() => {
-  const kw = userKeyword.value.trim().toLowerCase();
-  if (!kw) return users.value;
+  let items = users.value;
+  if (selectedOuDn.value) {
+    const target = normalizeDn(selectedOuDn.value);
+    items = items.filter((u) => {
+      const parentDn = parentDnOfUser(u.dn || "");
+      return parentDn && normalizeDn(parentDn) === target;
+    });
+  }
 
-  return users.value.filter((u) => {
-    const fields = [u.sAMAccountName, u.displayName, u.userPrincipalName, u.dn];
+  const kw = userKeyword.value.trim().toLowerCase();
+  if (!kw) return items;
+
+  return items.filter((u) => {
+    const ouPath = extractOuPathFromDn(u.dn || "");
+    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath];
     return fields.some((value) => (value || "").toLowerCase().includes(kw));
   });
 });
@@ -301,31 +244,155 @@ const paginatedUsers = computed(() => {
   return filteredUsers.value.slice(start, start + pageSize.value);
 });
 
-function pickGroup(cn) {
-  if (!cn || selectedGroups.value.includes(cn)) return;
-  selectedGroups.value.push(cn);
-  groupKeyword.value = "";
-  dropdownOpen.value = false;
-}
+const currentPageUsernames = computed(() =>
+  paginatedUsers.value
+    .map((u) => resolveUsername(u))
+    .filter((u) => u && !isProtectedUsername(u))
+);
 
-function addTypedGroup() {
-  const typed = groupKeyword.value.trim();
-  if (!typed) return;
-  pickGroup(typed);
-}
+const allCurrentPageSelected = computed(() => {
+  if (!currentPageUsernames.value.length) return false;
+  return currentPageUsernames.value.every((u) => selectedUsernames.value.includes(u));
+});
 
-function removeGroup(cn) {
-  selectedGroups.value = selectedGroups.value.filter((x) => x !== cn);
-}
-
-function focusGroupInput() {
-  groupInputRef.value?.focus();
-}
-
-function onClickOutside(event) {
-  if (!event.target.closest(".group-picker")) {
-    dropdownOpen.value = false;
+function extractOuPathFromDn(dn) {
+  if (!dn) return "";
+  const ous = [];
+  for (const part of dn.split(",")) {
+    const p = part.trim();
+    if (p.toUpperCase().startsWith("OU=")) {
+      ous.push(p.slice(3));
+    }
   }
+  return ous.reverse().join("/");
+}
+
+function normalizeDn(dn) {
+  return String(dn || "")
+    .split(",")
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean)
+    .join(",");
+}
+
+function parentDnOfUser(dn) {
+  const raw = String(dn || "");
+  const idx = raw.indexOf(",");
+  if (idx < 0) return "";
+  return raw.slice(idx + 1);
+}
+
+function extractCnFromDn(dn) {
+  if (!dn) return "";
+  const first = String(dn).split(",", 1)[0].trim();
+  if (!first.toUpperCase().startsWith("CN=")) return "";
+  return first.slice(3);
+}
+
+function resolveUsername(user) {
+  return user?.sAMAccountName || extractCnFromDn(user?.dn || "");
+}
+
+function isProtectedUsername(username) {
+  if (!username) return false;
+  return protectedUsernames.has(String(username).toLowerCase());
+}
+
+function openAddWindow() {
+  window.open("/users/new", "_blank", "noopener,noreferrer");
+}
+
+function clearOuFilter() {
+  selectedOuDn.value = "";
+  selectedOuPath.value = "";
+}
+
+function onRefreshUsers() {
+  userKeyword.value = "";
+  clearOuFilter();
+  currentPage.value = 1;
+  selectedUsernames.value = [];
+  actionMessage.value = "";
+  refreshUsers();
+}
+
+function onRefreshTree() {
+  ouKeyword.value = "";
+  clearOuFilter();
+  actionMessage.value = "";
+  refreshOuTree();
+}
+
+function onTreeLineClick(line) {
+  if (!line) return;
+  if (line.type === "ou") {
+    if (selectedOuDn.value.toLowerCase() === (line.dn || "").toLowerCase()) {
+      clearOuFilter();
+      return;
+    }
+    selectedOuDn.value = line.dn;
+    selectedOuPath.value = line.path || "";
+    return;
+  }
+
+  const text = line.text || "";
+  if (text) userKeyword.value = text;
+  if (line.path) selectedOuPath.value = line.path;
+}
+
+function toggleSelectUser(username, checked) {
+  if (!username || isProtectedUsername(username)) return;
+  if (checked) {
+    if (!selectedUsernames.value.includes(username)) {
+      selectedUsernames.value = [...selectedUsernames.value, username];
+    }
+    return;
+  }
+  selectedUsernames.value = selectedUsernames.value.filter((u) => u !== username);
+}
+
+function toggleSelectCurrentPage(checked) {
+  const pageUsers = currentPageUsernames.value;
+  if (checked) {
+    const merged = new Set([...selectedUsernames.value, ...pageUsers]);
+    selectedUsernames.value = Array.from(merged);
+    return;
+  }
+  const pageSet = new Set(pageUsers);
+  selectedUsernames.value = selectedUsernames.value.filter((u) => !pageSet.has(u));
+}
+
+async function onBatchDelete() {
+  const targets = [...selectedUsernames.value];
+  if (!targets.length) return;
+  const ok = window.confirm(`Delete ${targets.length} selected users? This cannot be undone.`);
+  if (!ok) return;
+
+  deletingBatch.value = true;
+  error.value = "";
+  actionMessage.value = "";
+  const failed = [];
+
+  for (const username of targets) {
+    try {
+      await apiDeleteUser(username);
+    } catch (e) {
+      failed.push({ username, message: e?.message || String(e) });
+    }
+  }
+
+  selectedUsernames.value = [];
+  await Promise.all([refreshUsers(), refreshOuTree()]);
+  deletingBatch.value = false;
+
+  if (!failed.length) {
+    actionMessage.value = `Deleted ${targets.length} users`;
+    return;
+  }
+
+  const okCount = targets.length - failed.length;
+  const details = failed.map((x) => `${x.username}: ${x.message}`).join("; ");
+  error.value = `Batch delete finished: success ${okCount}, failed ${failed.length}. ${details}`;
 }
 
 async function refreshUsers() {
@@ -333,46 +400,13 @@ async function refreshUsers() {
   error.value = "";
   try {
     users.value = await apiListLdapUsers();
+    selectedUsernames.value = selectedUsernames.value.filter((name) =>
+      users.value.some((u) => resolveUsername(u) === name)
+    );
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
     loadingUsers.value = false;
-  }
-}
-
-function goPrevPage() {
-  if (currentPage.value > 1) {
-    currentPage.value -= 1;
-  }
-}
-
-function goNextPage() {
-  if (currentPage.value < totalPages.value) {
-    currentPage.value += 1;
-  }
-}
-
-function parseOuPath(raw) {
-  if (!raw) return [];
-  return raw
-    .split("/")
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
-
-function applyOuPath(path) {
-  form.value.ou_path_text = path || "";
-}
-
-async function refreshGroups() {
-  loadingGroups.value = true;
-  error.value = "";
-  try {
-    groups.value = await apiListLdapGroups();
-  } catch (e) {
-    error.value = e?.message || String(e);
-  } finally {
-    loadingGroups.value = false;
   }
 }
 
@@ -388,199 +422,188 @@ async function refreshOuTree() {
   }
 }
 
-async function submit() {
-  submitting.value = true;
-  error.value = "";
-  fieldErrors.value = {};
-  submitMessage.value = "";
+function goPrevPage() {
+  if (currentPage.value > 1) currentPage.value -= 1;
+}
 
-  try {
-    const payload = {
-      username: form.value.username,
-      password: form.value.password,
-      student_id: form.value.student_id,
-      russian_name: form.value.russian_name,
-      pinyin_name: form.value.pinyin_name,
-      paid_flag: form.value.paid_flag || null,
-      groups: selectedGroups.value,
-      ou_path: parseOuPath(form.value.ou_path_text),
-    };
+function goNextPage() {
+  if (currentPage.value < totalPages.value) currentPage.value += 1;
+}
 
-    const res = await apiAddUser(payload);
-    const movedText = res.moved ? " moved" : "";
-    submitMessage.value = `Success: ${res.username} (${res.created ? "created" : "updated"}${movedText}).`;
-    await Promise.all([refreshUsers(), refreshOuTree()]);
-  } catch (e) {
-    const detail = e?.detail;
-    if (Array.isArray(detail)) {
-      const nextFieldErrors = {};
-      for (const item of detail) {
-        const path = Array.isArray(item?.loc) ? item.loc : [];
-        const field = path[0] === "body" ? path[path.length - 1] : null;
-        if (!field || nextFieldErrors[field]) continue;
-        nextFieldErrors[field] = item?.msg || "Invalid value";
-      }
-
-      if (Object.keys(nextFieldErrors).length) {
-        fieldErrors.value = nextFieldErrors;
-      } else {
-        error.value = e?.message || String(e);
-      }
-    } else {
-      error.value = e?.message || String(e);
-    }
-  } finally {
-    submitting.value = false;
-  }
+async function onWindowMessage(event) {
+  if (event.origin !== window.location.origin) return;
+  if (!event.data || event.data.type !== "USER_CREATED_OR_UPDATED") return;
+  actionMessage.value = `Saved user: ${event.data.username || "-"}`;
+  await Promise.all([refreshUsers(), refreshOuTree()]);
 }
 
 onMounted(async () => {
-  document.addEventListener("click", onClickOutside);
-  await Promise.all([refreshUsers(), refreshGroups(), refreshOuTree()]);
+  window.addEventListener("message", onWindowMessage);
+  await Promise.all([refreshUsers(), refreshOuTree()]);
 });
 
 onUnmounted(() => {
-  document.removeEventListener("click", onClickOutside);
+  window.removeEventListener("message", onWindowMessage);
 });
 
-watch([userKeyword, pageSize], () => {
+watch([userKeyword, selectedOuDn, pageSize], () => {
   currentPage.value = 1;
 });
 
 watch(totalPages, (next) => {
-  if (currentPage.value > next) {
-    currentPage.value = next;
-  }
+  if (currentPage.value > next) currentPage.value = next;
 });
 </script>
 
 <style scoped>
-.users-page { display: grid; gap: 16px; }
+.users-page {
+  display: grid;
+  gap: 16px;
+}
+.page-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 2px;
+}
+.page-head h2 {
+  margin: 0;
+  line-height: 1.1;
+}
+.sub {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+.workspace {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 2.2fr);
+  align-items: stretch;
+}
 .panel {
-  border: 1px solid #e8e8e8;
-  border-radius: 12px;
+  border: 1px solid #dde5ef;
+  border-radius: 14px;
   padding: 14px;
-  background: #fff;
+  background: #ffffff;
+  min-width: 0;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+.tree-panel,
+.list-panel {
+  height: 68vh;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
 }
 .panel-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   margin-bottom: 12px;
+}
+.tree-panel .panel-head {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.tree-panel .panel-actions {
+  justify-content: stretch;
+}
+.tree-panel .panel-actions > * {
+  width: 100%;
+}
+.panel-head h3 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.tree-panel .panel-head h3 {
+  font-size: 17px;
+  letter-spacing: 0;
+}
+.list-head {
+  align-items: start;
+}
+.head-left {
+  display: grid;
+  gap: 6px;
 }
 .panel-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.list-actions {
+  justify-content: flex-end;
+}
+.btn {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid #d3dde8;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #0f172a;
+  font-weight: 600;
+}
+.btn:hover {
+  background: #eef2f7;
+}
+.btn:disabled {
+  opacity: 0.6;
+}
+.btn.primary {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+.btn.primary:hover {
+  background: #111f38;
+}
+.btn.danger {
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
 }
 .search-input {
   width: 320px;
-  max-width: 52vw;
-}
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 10px;
-}
-label { display: grid; gap: 6px; font-size: 14px; }
-input {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 8px 10px;
-}
-.btn {
-  padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  background: #f7f7f7;
-}
-.group-picker { margin-top: 12px; display: grid; gap: 8px; position: relative; }
-.ou-picker {
-  margin-top: 12px;
-  display: grid;
-  gap: 8px;
-}
-.ou-quick {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.btn.mini {
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.combo {
-  min-height: 42px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.group-input {
-  border: none;
-  outline: none;
-  min-width: 280px;
-  flex: 1;
-}
-.dropdown {
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  max-width: 33vw;
+  height: 36px;
+  border: 1px solid #cfd8e3;
+  border-radius: 10px;
+  padding: 0 12px;
   background: #fff;
-  max-height: 220px;
-  overflow: auto;
-  padding: 6px;
-  display: grid;
-  gap: 4px;
 }
-.dropdown-item {
-  text-align: left;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: #fff;
-  padding: 8px;
-}
-.dropdown-item:hover { background: #f3f4f6; }
-.dropdown-item.create { color: #1d4ed8; }
-.chip {
-  background: #eef4ff;
-  color: #224;
-  border: 1px solid #cfe0ff;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
+.active-filter {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-}
-.chip-x {
-  border: none;
-  background: transparent;
-  color: #334155;
-  padding: 0;
-  width: 16px;
-  height: 16px;
-  line-height: 16px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  width: fit-content;
 }
 .table-wrap {
+  flex: 1;
   overflow: auto;
-  border: 1px solid #eceff3;
+  border: 1px solid #e6edf4;
   border-radius: 12px;
-  background: linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+  background: #fff;
+  max-height: none;
 }
 .user-table {
   width: 100%;
+  min-width: 1200px;
   border-collapse: separate;
   border-spacing: 0;
 }
 .user-table th,
 .user-table td {
-  border-bottom: 1px solid #edf0f3;
-  padding: 11px 14px;
+  border-bottom: 1px solid #edf2f7;
+  padding: 11px 12px;
   text-align: left;
   vertical-align: top;
 }
@@ -589,10 +612,14 @@ input {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #64748b;
-  background: #f8fafc;
+  background: #f8fbff;
   position: sticky;
   top: 0;
   z-index: 1;
+}
+.check-col {
+  width: 44px;
+  text-align: center !important;
 }
 .user-table tbody tr:hover {
   background: #f8fbff;
@@ -600,38 +627,43 @@ input {
 .user-table tbody tr:last-child td {
   border-bottom: none;
 }
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-.dn {
-  max-width: 420px;
-  word-break: break-all;
-  color: #334155;
-}
 .empty-row td {
   text-align: center;
   padding: 20px 12px;
 }
 .ou-tree-wrap {
-  border: 1px solid #eceff3;
+  flex: 1;
+  border: 1px solid #e6edf4;
   border-radius: 12px;
   padding: 10px;
   background: #fbfdff;
   display: grid;
   gap: 6px;
+  max-height: none;
+  overflow: auto;
 }
 .ou-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 20px;
+}
+.ou-row.clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 3px 6px;
+}
+.ou-row.clickable:hover {
+  background: #f1f5f9;
+}
+.ou-row.active {
+  background: #e6f0ff;
 }
 .tree-tag {
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
-  padding: 4px 7px;
+  padding: 2px 6px;
   border: 1px solid #dbe3ef;
   color: #334155;
   background: #eff6ff;
@@ -652,24 +684,9 @@ input {
   align-items: center;
   gap: 10px;
 }
-.pager-summary {
-  min-width: 150px;
-}
-.pager-summary strong {
-  font-size: 20px;
-  line-height: 1;
-  color: #0f172a;
-}
-.pager-size label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #334155;
-}
 .pager-nav {
   margin-left: auto;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   padding: 4px;
   gap: 6px;
@@ -691,65 +708,71 @@ select {
   margin-left: 0;
   background: #fff;
 }
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.main-text {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.1;
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
+  font-weight: 600;
+}
+.dn {
+  max-width: 520px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #475569;
+}
 .error {
   color: #b00020;
   background: #fde7ea;
   border: 1px solid #f5c2c7;
-  padding: 8px;
-  border-radius: 8px;
+  padding: 10px;
+  border-radius: 10px;
   white-space: pre-wrap;
-}
-.field-error {
-  color: #b00020;
-  font-size: 12px;
-  line-height: 1.3;
 }
 .ok {
   color: #14532d;
   background: #dcfce7;
   border: 1px solid #86efac;
-  padding: 8px;
-  border-radius: 8px;
+  padding: 10px;
+  border-radius: 10px;
 }
-.muted { color: #777; }
-@media (max-width: 800px) {
-  .grid { grid-template-columns: 1fr; }
-  .group-input { min-width: 180px; }
-  .panel-head {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .panel-actions {
-    width: 100%;
+.muted {
+  color: #77818f;
+}
+
+@media (max-width: 1200px) {
+  .workspace {
+    grid-template-columns: 1fr;
   }
   .search-input {
     width: 100%;
     max-width: none;
   }
-  .user-table th,
-  .user-table td {
-    padding: 10px;
-  }
-  .pager {
+  .panel-head {
+    flex-direction: column;
     align-items: stretch;
   }
-  .pager-summary {
+  .list-actions,
+  .panel-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .list-actions > * {
+    flex: 1;
     min-width: 0;
   }
-  .pager-size {
-    width: 100%;
+  .table-wrap,
+  .ou-tree-wrap {
+    max-height: none;
   }
-  .pager-size label {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .pager-nav {
-    width: 100%;
-    justify-content: space-between;
-    margin-left: 0;
-  }
-  .page-indicator {
-    margin: 0 auto;
+  .tree-panel,
+  .list-panel {
+    height: auto;
+    min-height: 0;
   }
 }
 </style>
