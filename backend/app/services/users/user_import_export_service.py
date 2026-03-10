@@ -379,7 +379,19 @@ def _extract_ou_path(dn: str) -> str:
     return " > ".join(reversed(ous))
 
 
-def export_users_csv() -> bytes:
+def _parent_dn(dn: str) -> str:
+    raw = str(dn or "")
+    idx = raw.find(",")
+    if idx < 0:
+        return ""
+    return raw[idx + 1 :]
+
+
+def export_users_csv(
+    keyword: str | None = None,
+    ou_dn: str | None = None,
+    group_cns: Optional[Iterable[str]] = None,
+) -> bytes:
     svc = get_ldap_service()
     users = svc.list_users()
     groups = svc.list_groups()
@@ -395,8 +407,54 @@ def export_users_csv() -> bytes:
                 continue
             groups_by_user.setdefault(key, set()).add(cn)
 
+    filtered_users = users
+    target_ou = _normalize_dn(ou_dn or "")
+    if target_ou:
+        filtered_users = [
+            user
+            for user in filtered_users
+            if _normalize_dn(_parent_dn(user.dn or "")) == target_ou
+        ]
+
+    normalized_group_cns = {
+        _normalize_spaces(cn).lower()
+        for cn in (group_cns or [])
+        if _normalize_spaces(cn)
+    }
+    if normalized_group_cns:
+        next_users: list = []
+        for user in filtered_users:
+            user_dn_key = _normalize_dn(user.dn or "")
+            user_groups = groups_by_user.get(user_dn_key, set())
+            if any((group or "").strip().lower() in normalized_group_cns for group in user_groups):
+                next_users.append(user)
+        filtered_users = next_users
+
+    kw = _normalize_spaces(keyword or "").lower()
+    if kw:
+        next_users = []
+        for user in filtered_users:
+            dn = user.dn or ""
+            dn_key = _normalize_dn(dn)
+            user_groups = sorted(groups_by_user.get(dn_key, set()))
+            fields = [
+                user.sAMAccountName or "",
+                user.givenName or "",
+                user.sn or "",
+                user.displayName or "",
+                user.employeeID or "",
+                user.employeeType or "",
+                user.userPrincipalName or "",
+                dn,
+                _extract_ou_path(dn),
+                " ".join(user_groups),
+            ]
+            if any(kw in field.lower() for field in fields):
+                next_users.append(user)
+        filtered_users = next_users
+
     ordered_users = sorted(
-        users,
+        filtered_users,
         key=lambda u: ((u.sAMAccountName or "").lower(), (u.displayName or "").lower(), (u.dn or "").lower()),
     )
 

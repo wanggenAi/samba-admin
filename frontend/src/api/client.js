@@ -1,4 +1,5 @@
 // frontend/src/api/client.js
+const ALLOWED_USER_VIEWS = new Set(["full", "list", "dashboard", "tree"]);
 
 async function request(path, options = {}) {
     const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -11,13 +12,18 @@ async function request(path, options = {}) {
         ...options,
     });
 
-    // FastAPI error (e.g. 500) try to read json/text
-    const text = await res.text();
-    let data;
-    try {
-        data = text ? JSON.parse(text) : null;
-    } catch {
-        data = text;
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    const isJson = contentType.includes("application/json");
+
+    let data = null;
+    if (isJson) {
+        try {
+            data = await res.json();
+        } catch {
+            data = null;
+        }
+    } else {
+        data = await res.text();
     }
 
     if (!res.ok) {
@@ -71,16 +77,34 @@ export function apiRollbackVersion(vid) {
     });
 }
 
-export function apiListLdapUsers() {
-    return request("/api/ldap/users");
+export function apiListLdapUsers(options = {}) {
+    const safe = String(options?.view || "full").trim().toLowerCase();
+    const view = ALLOWED_USER_VIEWS.has(safe) ? safe : "full";
+    const path = view === "full" ? "/api/ldap/users" : `/api/ldap/users?view=${encodeURIComponent(view)}`;
+    return request(path);
 }
 
-export function apiListLdapGroups() {
-    return request("/api/ldap/groups");
+export function apiListLdapGroups(options = {}) {
+    const includeMembers = options?.includeMembers !== false;
+    const includeDescription = options?.includeDescription === true;
+    const params = new URLSearchParams();
+    if (!includeMembers) params.set("include_members", "false");
+    if (includeDescription) params.set("include_description", "true");
+    const query = params.toString();
+    const path = query ? `/api/ldap/groups?${query}` : "/api/ldap/groups";
+    return request(path);
 }
 
-export function apiListLdapOuTree() {
-    return request("/api/ldap/ou-tree");
+export function apiListLdapOuTree(options = {}) {
+    const includeUsers = options?.includeUsers !== false;
+    const rawView = String(options?.userView || "full").trim().toLowerCase();
+    const userView = ALLOWED_USER_VIEWS.has(rawView) ? rawView : "full";
+    const params = new URLSearchParams();
+    if (!includeUsers) params.set("include_users", "false");
+    if (includeUsers && userView && userView !== "full") params.set("user_view", userView);
+    const query = params.toString();
+    const path = query ? `/api/ldap/ou-tree?${query}` : "/api/ldap/ou-tree";
+    return request(path);
 }
 
 export function apiCreateLdapOu(payload) {
@@ -135,8 +159,26 @@ export function apiImportUsers(
     });
 }
 
-export async function apiExportUsers() {
-    const res = await fetch("/api/users/export", { method: "GET" });
+export async function apiExportUsers({
+    keyword = "",
+    ouDn = "",
+    groupCns = [],
+} = {}) {
+    const params = new URLSearchParams();
+    const kw = String(keyword || "").trim();
+    if (kw) params.set("keyword", kw);
+
+    const ou = String(ouDn || "").trim();
+    if (ou) params.set("ou_dn", ou);
+
+    for (const groupCn of groupCns || []) {
+        const cn = String(groupCn || "").trim();
+        if (cn) params.append("group_cn", cn);
+    }
+
+    const query = params.toString();
+    const path = query ? `/api/users/export?${query}` : "/api/users/export";
+    const res = await fetch(path, { method: "GET" });
     if (!res.ok) {
         const text = await res.text();
         let data;

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import List, Optional, TypeVar
+from typing import List, Literal, Optional, TypeVar
 
 from fastapi import APIRouter, HTTPException, Query
 from ldap3 import Connection
@@ -105,14 +105,27 @@ def health():
     return ldap_guard(_run)
 
 
-@router.get("/groups", response_model=List[LdapGroup])
-def list_groups():
-    return ldap_guard(lambda: get_ldap_service().list_groups())
+@router.get("/groups", response_model=List[LdapGroup], response_model_exclude_none=True, response_model_exclude_defaults=True)
+def list_groups(
+    include_members: bool = Query(default=True, description="include group member DN list"),
+    include_description: bool = Query(default=True, description="include group description"),
+):
+    return ldap_guard(
+        lambda: get_ldap_service().list_groups(
+            include_members=include_members,
+            include_description=include_description,
+        )
+    )
 
 
-@router.get("/users", response_model=List[LdapUser])
-def list_users():
-    return ldap_guard(lambda: get_ldap_service().list_users())
+@router.get("/users", response_model=List[LdapUser], response_model_exclude_none=True)
+def list_users(
+    view: Literal["full", "list", "dashboard", "tree"] = Query(
+        default="full",
+        description="field set profile for user payload size",
+    ),
+):
+    return ldap_guard(lambda: get_ldap_service().list_users(view=view))
 
 
 @router.get("/tree", response_model=List[GroupTreeNode])
@@ -120,9 +133,15 @@ def group_tree(root_group: Optional[str] = Query(default=None, description="opti
     return ldap_guard(lambda: get_ldap_service().build_group_tree(root_group_cn=root_group))
 
 
-@router.get("/ou-tree", response_model=List[OuTreeNode])
-def ou_tree():
-    return ldap_guard(lambda: get_ldap_service().build_ou_tree())
+@router.get("/ou-tree", response_model=List[OuTreeNode], response_model_exclude_none=True)
+def ou_tree(
+    include_users: bool = Query(default=True, description="include user nodes under OUs"),
+    user_view: Literal["full", "list", "dashboard", "tree"] = Query(
+        default="full",
+        description="user field profile when include_users=true",
+    ),
+):
+    return ldap_guard(lambda: get_ldap_service().build_ou_tree(include_users=include_users, user_view=user_view))
 
 
 @router.post("/ou", response_model=OuCreateResponse)

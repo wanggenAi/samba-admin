@@ -159,7 +159,12 @@
         <button class="btn" type="button" @click="resetFilters">Reset Filters</button>
       </div>
 
-      <div class="table-wrap" ref="tableWrapRef">
+      <div
+        class="table-wrap"
+        :class="{ autoscroll: autoScrollEnabled }"
+        ref="tableWrapRef"
+        @wheel="onTableWheel"
+      >
         <table class="log-table">
           <thead>
             <tr>
@@ -174,13 +179,25 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="u in paginatedUsers" :key="u.dn" class="log-row">
+            <tr
+              v-for="(u, idx) in renderedUsers"
+              :key="`${u.dn}:${idx}`"
+              ref="logRowRefs"
+              class="log-row"
+              :class="rowStripeClass(idx)"
+            >
               <td class="mono user-col">
-                <span class="user-chip">{{ u.sAMAccountName || "-" }}</span>
+                <span class="user-chip" :class="{ 'is-empty-cell': !hasValue(u.sAMAccountName) }">
+                  {{ u.sAMAccountName || EMPTY_MARK }}
+                </span>
               </td>
-              <td>{{ u.displayName || [u.givenName, u.sn].filter(Boolean).join(" ") || "-" }}</td>
-              <td class="mono">{{ u.userPrincipalName || "-" }}</td>
-              <td>{{ formatOuPathFromDn(u.dn) || "-" }}</td>
+              <td :class="{ 'is-empty-cell': !hasValue(displayNameValue(u)) }">
+                {{ displayNameValue(u) || EMPTY_MARK }}
+              </td>
+              <td class="mono" :class="{ 'is-empty-cell': !hasValue(u.userPrincipalName) }">
+                {{ u.userPrincipalName || EMPTY_MARK }}
+              </td>
+              <td :class="{ 'is-empty-cell': !hasValue(ouPathValue(u)) }">{{ ouPathValue(u) || EMPTY_MARK }}</td>
               <td>
                 <div class="group-cell">
                   <span
@@ -190,7 +207,7 @@
                   >
                     {{ cn }}
                   </span>
-                  <span v-if="!groupsByUser(u).length" class="muted">-</span>
+                  <span v-if="!groupsByUser(u).length" class="empty-mark">{{ EMPTY_MARK }}</span>
                 </div>
               </td>
               <td class="mono time-cell" :class="{ 'time-empty': !parseLdapTimestamp(u.lastLogon) }">
@@ -273,9 +290,14 @@ const currentPage = ref(1);
 const pageSize = ref(20);
 
 const tableWrapRef = ref(null);
+const logRowRefs = ref([]);
 const autoScrollEnabled = ref(true);
 let autoScrollTimer = null;
 const EMPTY_STR_LIST = Object.freeze([]);
+const EMPTY_MARK = "-";
+const AUTO_SCROLL_STEP_PX = 1;
+const AUTO_SCROLL_INTERVAL_MS = 28;
+const seamlessLoopHeightPx = ref(0);
 
 const selectedOuKey = computed(() => normalizeDn(selectedOuDn.value));
 
@@ -445,6 +467,52 @@ const paginatedUsers = computed(() => {
   return filteredUsers.value.slice(start, start + pageSize.value);
 });
 
+const seamlessScrollActive = computed(() => autoScrollEnabled.value && paginatedUsers.value.length > 1);
+
+const renderedUsers = computed(() => {
+  const pageRows = paginatedUsers.value;
+  if (!seamlessScrollActive.value) return pageRows;
+  // Duplicate rows once to support loop-reset without visible jump.
+  return pageRows.concat(pageRows);
+});
+
+function rowStripeClass(renderedIndex) {
+  const baseLen = paginatedUsers.value.length;
+  if (!baseLen) return "stripe-odd";
+  const baseIndex = renderedIndex % baseLen;
+  return baseIndex % 2 === 0 ? "stripe-odd" : "stripe-even";
+}
+
+async function recomputeSeamlessLoopHeight() {
+  await nextTick();
+  const rows = Array.isArray(logRowRefs.value) ? logRowRefs.value : [];
+  if (!seamlessScrollActive.value) {
+    seamlessLoopHeightPx.value = 0;
+    return;
+  }
+
+  const half = paginatedUsers.value.length;
+  if (half < 2 || rows.length < half + 1) {
+    seamlessLoopHeightPx.value = 0;
+    return;
+  }
+
+  const first = rows[0];
+  const secondStart = rows[half];
+  if (!(first instanceof HTMLElement) || !(secondStart instanceof HTMLElement)) {
+    seamlessLoopHeightPx.value = 0;
+    return;
+  }
+
+  const loopHeight = secondStart.offsetTop - first.offsetTop;
+  seamlessLoopHeightPx.value = loopHeight > 0 ? loopHeight : 0;
+
+  const wrap = tableWrapRef.value;
+  if (wrap && seamlessLoopHeightPx.value > 0 && wrap.scrollTop >= seamlessLoopHeightPx.value) {
+    wrap.scrollTop = wrap.scrollTop % seamlessLoopHeightPx.value;
+  }
+}
+
 function normalizeDn(dn) {
   return String(dn || "")
     .split(",")
@@ -471,6 +539,20 @@ function formatOuPathFromDn(dn) {
     }
   }
   return ous.reverse().join(" > ");
+}
+
+function hasValue(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function displayNameValue(user) {
+  const direct = String(user?.displayName || "").trim();
+  if (direct) return direct;
+  return [user?.givenName, user?.sn].filter((v) => hasValue(v)).join(" ").trim();
+}
+
+function ouPathValue(user) {
+  return formatOuPathFromDn(user?.dn || "");
 }
 
 function groupsByUser(user) {
@@ -612,9 +694,9 @@ async function refreshAll() {
   try {
     const [health, nextUsers, nextGroups, nextOuTree] = await Promise.all([
       apiLdapHealth(),
-      apiListLdapUsers(),
-      apiListLdapGroups(),
-      apiListLdapOuTree(),
+      apiListLdapUsers({ view: "dashboard" }),
+      apiListLdapGroups({ includeMembers: true, includeDescription: false }),
+      apiListLdapOuTree({ includeUsers: false }),
     ]);
     status.value = health;
     users.value = nextUsers;
@@ -660,16 +742,26 @@ function startAutoScroll() {
     const el = tableWrapRef.value;
     if (!el) return;
     if (document.hidden) return;
+
+    if (seamlessScrollActive.value) {
+      const loopHeight = seamlessLoopHeightPx.value;
+      if (loopHeight > el.clientHeight + 8) {
+        const next = el.scrollTop + AUTO_SCROLL_STEP_PX;
+        el.scrollTop = next >= loopHeight ? next - loopHeight : next;
+        return;
+      }
+    }
+
     const maxTop = el.scrollHeight - el.clientHeight;
     if (maxTop <= 8) return;
 
-    const next = el.scrollTop + 2;
+    const next = el.scrollTop + AUTO_SCROLL_STEP_PX;
     if (next >= maxTop) {
       el.scrollTop = 0;
     } else {
       el.scrollTop = next;
     }
-  }, 70);
+  }, AUTO_SCROLL_INTERVAL_MS);
 }
 
 function onClickOutside(event) {
@@ -683,9 +775,15 @@ function onClickOutside(event) {
   }
 }
 
+function onTableWheel(event) {
+  if (!autoScrollEnabled.value) return;
+  event.preventDefault();
+}
+
 onMounted(async () => {
   document.addEventListener("click", onClickOutside);
   await refreshAll();
+  await recomputeSeamlessLoopHeight();
   startAutoScroll();
 });
 
@@ -702,13 +800,17 @@ watch(totalPages, (next) => {
   if (currentPage.value > next) currentPage.value = next;
 });
 
-watch(autoScrollEnabled, (enabled) => {
-  if (enabled) startAutoScroll();
-  else stopAutoScroll();
+watch(autoScrollEnabled, async (enabled) => {
+  if (!enabled) {
+    stopAutoScroll();
+    return;
+  }
+  await recomputeSeamlessLoopHeight();
+  startAutoScroll();
 });
 
-watch([paginatedUsers, currentPage, pageSize], async () => {
-  await nextTick();
+watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () => {
+  await recomputeSeamlessLoopHeight();
   if (autoScrollEnabled.value) startAutoScroll();
 });
 </script>
@@ -1013,9 +1115,20 @@ watch([paginatedUsers, currentPage, pageSize], async () => {
 .table-wrap {
   max-height: 62vh;
   overflow: auto;
+  scrollbar-gutter: stable both-edges;
   border: 1px solid #d9e5f3;
   border-radius: 12px;
   background: #fff;
+}
+.table-wrap.autoscroll {
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.table-wrap.autoscroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 .log-table {
   width: 100%;
@@ -1045,8 +1158,11 @@ watch([paginatedUsers, currentPage, pageSize], async () => {
 .log-table tbody tr {
   transition: background-color 140ms ease;
 }
-.log-table tbody tr:nth-child(odd) {
+.log-table tbody tr.stripe-odd {
   background: #fcfdff;
+}
+.log-table tbody tr.stripe-even {
+  background: #ffffff;
 }
 .log-table tbody tr:hover {
   background: #eef6ff;
@@ -1119,6 +1235,17 @@ watch([paginatedUsers, currentPage, pageSize], async () => {
   padding: 1px 8px;
   font-size: 12px;
   line-height: 1.4;
+}
+.empty-mark {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: center;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: #94a3b8;
+}
+.is-empty-cell {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+  color: #94a3b8;
 }
 .pager {
   margin-top: 12px;

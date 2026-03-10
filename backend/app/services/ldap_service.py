@@ -86,6 +86,70 @@ class LdapService:
             return self.cfg.user_container_dn
         return f"CN=Users,{self.cfg.base_dn}"
 
+    @staticmethod
+    def _user_attributes_for_view(view: str) -> List[str]:
+        normalized = (view or "full").strip().lower()
+        view_map: Dict[str, List[str]] = {
+            "full": [
+                "distinguishedName",
+                "sAMAccountName",
+                "displayName",
+                "userPrincipalName",
+                "givenName",
+                "sn",
+                "employeeID",
+                "employeeType",
+                "whenCreated",
+                "whenChanged",
+                "lastLogon",
+                "lastLogoff",
+            ],
+            "list": [
+                "distinguishedName",
+                "sAMAccountName",
+                "displayName",
+                "userPrincipalName",
+                "givenName",
+                "sn",
+                "employeeID",
+                "employeeType",
+                "whenCreated",
+                "whenChanged",
+            ],
+            "dashboard": [
+                "distinguishedName",
+                "sAMAccountName",
+                "displayName",
+                "userPrincipalName",
+                "givenName",
+                "sn",
+                "lastLogon",
+                "lastLogoff",
+            ],
+            "tree": [
+                "distinguishedName",
+                "sAMAccountName",
+                "displayName",
+            ],
+        }
+        return view_map.get(normalized, view_map["full"])
+
+    def _ldap_user_from_entry(self, entry: object) -> LdapUser:
+        return LdapUser(
+            dn=self._entry_attr(entry, "distinguishedName") or "",
+            sAMAccountName=self._entry_attr(entry, "sAMAccountName"),
+            displayName=self._entry_attr(entry, "displayName"),
+            userPrincipalName=self._entry_attr(entry, "userPrincipalName"),
+            givenName=self._entry_attr(entry, "givenName"),
+            sn=self._entry_attr(entry, "sn"),
+            employeeID=self._entry_attr(entry, "employeeID"),
+            employeeType=self._entry_attr(entry, "employeeType"),
+            whenCreated=self._entry_attr(entry, "whenCreated"),
+            whenChanged=self._entry_attr(entry, "whenChanged"),
+            lastLogon=self._entry_attr(entry, "lastLogon"),
+            lastLogoff=self._entry_attr(entry, "lastLogoff"),
+        )
+
     # ----------------------------
     # Generic LDAP operations (write/read)
     # ----------------------------
@@ -448,12 +512,18 @@ class LdapService:
                 attributes=["defaultNamingContext"],
             )
 
-    def list_groups(self) -> List[LdapGroup]:
+    def list_groups(self, include_members: bool = True, include_description: bool = True) -> List[LdapGroup]:
+        attrs = ["cn", "distinguishedName"]
+        if include_members:
+            attrs.append("member")
+        if include_description:
+            attrs.append("description")
+
         with self.connection() as conn:
             conn.search(
                 search_base=self.cfg.base_dn,
                 search_filter="(objectClass=group)",
-                attributes=["cn", "distinguishedName", "member", "description"],
+                attributes=attrs,
             )
             groups: List[LdapGroup] = []
             for e in conn.entries:
@@ -461,53 +531,28 @@ class LdapService:
                     LdapGroup(
                         cn=str(getattr(e, "cn", "")),
                         dn=str(getattr(e, "distinguishedName", "")),
-                        description=str(getattr(e, "description", "")) if hasattr(e, "description") else None,
-                        members=[str(x) for x in getattr(e, "member", [])] if hasattr(e, "member") else [],
+                        description=(
+                            str(getattr(e, "description", "")) if include_description and hasattr(e, "description") else None
+                        ),
+                        members=[str(x) for x in getattr(e, "member", [])] if include_members and hasattr(e, "member") else [],
                     )
                 )
             return groups
 
-    def list_users(self) -> List[LdapUser]:
+    def list_users(self, view: str = "full") -> List[LdapUser]:
+        attrs = self._user_attributes_for_view(view)
         with self.connection() as conn:
             conn.search(
                 search_base=self.cfg.base_dn,
                 search_filter="(&(objectClass=user)(!(objectClass=computer)))",
-                attributes=[
-                    "distinguishedName",
-                    "sAMAccountName",
-                    "displayName",
-                    "userPrincipalName",
-                    "givenName",
-                    "sn",
-                    "employeeID",
-                    "employeeType",
-                    "whenCreated",
-                    "whenChanged",
-                    "lastLogon",
-                    "lastLogoff",
-                ],
+                attributes=attrs,
             )
             users: List[LdapUser] = []
             for e in conn.entries:
-                users.append(
-                    LdapUser(
-                        dn=self._entry_attr(e, "distinguishedName") or "",
-                        sAMAccountName=self._entry_attr(e, "sAMAccountName"),
-                        displayName=self._entry_attr(e, "displayName"),
-                        userPrincipalName=self._entry_attr(e, "userPrincipalName"),
-                        givenName=self._entry_attr(e, "givenName"),
-                        sn=self._entry_attr(e, "sn"),
-                        employeeID=self._entry_attr(e, "employeeID"),
-                        employeeType=self._entry_attr(e, "employeeType"),
-                        whenCreated=self._entry_attr(e, "whenCreated"),
-                        whenChanged=self._entry_attr(e, "whenChanged"),
-                        lastLogon=self._entry_attr(e, "lastLogon"),
-                        lastLogoff=self._entry_attr(e, "lastLogoff"),
-                    )
-                )
+                users.append(self._ldap_user_from_entry(e))
             return users
 
-    def build_ou_tree(self) -> List[OuTreeNode]:
+    def build_ou_tree(self, include_users: bool = True, user_view: str = "full") -> List[OuTreeNode]:
         with self.connection() as conn:
             conn.search(
                 search_base=self.cfg.base_dn,
@@ -516,23 +561,14 @@ class LdapService:
             )
             ou_entries = list(conn.entries)
 
-            conn.search(
-                search_base=self.cfg.base_dn,
-                search_filter="(&(objectClass=user)(!(objectClass=computer)))",
-                attributes=[
-                    "distinguishedName",
-                    "sAMAccountName",
-                    "displayName",
-                    "userPrincipalName",
-                    "givenName",
-                    "sn",
-                    "whenCreated",
-                    "whenChanged",
-                    "lastLogon",
-                    "lastLogoff",
-                ],
-            )
-            user_entries = list(conn.entries)
+            user_entries: List[object] = []
+            if include_users:
+                conn.search(
+                    search_base=self.cfg.base_dn,
+                    search_filter="(&(objectClass=user)(!(objectClass=computer)))",
+                    attributes=self._user_attributes_for_view(user_view),
+                )
+                user_entries = list(conn.entries)
 
         dn_to_node: Dict[str, OuTreeNode] = {}
         children_by_parent: Dict[str, Set[str]] = {}
@@ -565,20 +601,7 @@ class LdapService:
             parent = dn_to_node.get(parent_key)
             if not parent:
                 continue
-            parent.users.append(
-                LdapUser(
-                    dn=user_dn,
-                    sAMAccountName=str(getattr(entry, "sAMAccountName", "")) if hasattr(entry, "sAMAccountName") else None,
-                    displayName=str(getattr(entry, "displayName", "")) if hasattr(entry, "displayName") else None,
-                    userPrincipalName=str(getattr(entry, "userPrincipalName", "")) if hasattr(entry, "userPrincipalName") else None,
-                    givenName=str(getattr(entry, "givenName", "")) if hasattr(entry, "givenName") else None,
-                    sn=str(getattr(entry, "sn", "")) if hasattr(entry, "sn") else None,
-                    whenCreated=str(getattr(entry, "whenCreated", "")) if hasattr(entry, "whenCreated") else None,
-                    whenChanged=str(getattr(entry, "whenChanged", "")) if hasattr(entry, "whenChanged") else None,
-                    lastLogon=str(getattr(entry, "lastLogon", "")) if hasattr(entry, "lastLogon") else None,
-                    lastLogoff=str(getattr(entry, "lastLogoff", "")) if hasattr(entry, "lastLogoff") else None,
-                )
-            )
+            parent.users.append(self._ldap_user_from_entry(entry))
 
         for node in dn_to_node.values():
             node.users.sort(key=lambda u: (u.sAMAccountName or "").lower())

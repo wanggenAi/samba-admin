@@ -14,9 +14,27 @@
           multiple
           @change="onImportFiles"
         />
-        <button class="btn" type="button" :disabled="importing" @click="triggerImport">
+        <button
+          class="btn"
+          type="button"
+          :disabled="importing"
+          title="TXT only, max 2 MB per file, max 10 MB total"
+          @click="triggerImport"
+        >
           {{ importing ? "Importing..." : "Import TXT" }}
         </button>
+        <span
+          class="import-limit-help"
+          tabindex="0"
+          role="note"
+          aria-label="Import limits"
+          title="Import limits"
+        >
+          ?
+          <span class="import-limit-tooltip" role="tooltip">
+            TXT only. Max {{ importLimitPerFileText }} per file, max {{ importLimitTotalText }} total.
+          </span>
+        </span>
         <button class="btn" type="button" :disabled="exporting" @click="onExportUsers">
           {{ exporting ? "Exporting..." : "Export CSV" }}
         </button>
@@ -29,7 +47,7 @@
     <section v-if="importReport" class="panel import-report">
       <div class="import-report-head">
         <h3>Import Report</h3>
-        <button class="btn" type="button" @click="importReport = null">Close</button>
+        <button class="btn" type="button" @click="closeImportReport">Close</button>
       </div>
       <p class="muted">
         Files: {{ importReport.total_files }} |
@@ -55,14 +73,14 @@
           <tbody>
             <tr v-for="(item, idx) in importReport.results" :key="`${item.file_name}:${item.line_no}:${idx}`">
               <td>{{ item.file_name }}</td>
-              <td class="mono">{{ item.line_no || "-" }}</td>
+              <td class="mono" :class="{ 'is-empty-cell': !item.line_no }">{{ item.line_no || EMPTY_MARK }}</td>
               <td>
                 <span class="import-status" :class="item.status">{{ item.status }}</span>
               </td>
-              <td class="mono">{{ item.username || "-" }}</td>
-              <td class="mono">{{ item.password || "-" }}</td>
-              <td>{{ [item.first_name, item.last_name].filter(Boolean).join(" ") || "-" }}</td>
-              <td>{{ item.ou_path?.length ? item.ou_path.join(" > ") : "-" }}</td>
+              <td class="mono" :class="{ 'is-empty-cell': !hasValue(item.username) }">{{ item.username || EMPTY_MARK }}</td>
+              <td class="mono" :class="{ 'is-empty-cell': !hasValue(item.password) }">{{ item.password || EMPTY_MARK }}</td>
+              <td :class="{ 'is-empty-cell': !hasValue(importNameValue(item)) }">{{ importNameValue(item) || EMPTY_MARK }}</td>
+              <td :class="{ 'is-empty-cell': !(item.ou_path?.length) }">{{ item.ou_path?.length ? item.ou_path.join(" > ") : EMPTY_MARK }}</td>
               <td>{{ item.message }}</td>
             </tr>
           </tbody>
@@ -244,14 +262,18 @@
                     @change="toggleSelectUser(resolveUsername(u), $event.target.checked)"
                   />
                 </td>
-                <td class="mono username-col" :title="u.sAMAccountName || '-'">{{ u.sAMAccountName || "-" }}</td>
-                <td>{{ u.displayName || "-" }}</td>
-                <td>{{ u.givenName || "-" }}</td>
-                <td>{{ u.sn || "-" }}</td>
-                <td class="mono">{{ u.employeeID || "-" }}</td>
-                <td class="mono">{{ u.employeeType || "-" }}</td>
-                <td class="mono">{{ u.userPrincipalName || "-" }}</td>
-                <td class="mono">{{ formatLdapTime(userUpdatedAt(u)) }}</td>
+                <td class="mono username-col" :class="{ 'is-empty-cell': !hasValue(u.sAMAccountName) }" :title="u.sAMAccountName || EMPTY_MARK">
+                  {{ u.sAMAccountName || EMPTY_MARK }}
+                </td>
+                <td :class="{ 'is-empty-cell': !hasValue(u.displayName) }">{{ u.displayName || EMPTY_MARK }}</td>
+                <td :class="{ 'is-empty-cell': !hasValue(u.givenName) }">{{ u.givenName || EMPTY_MARK }}</td>
+                <td :class="{ 'is-empty-cell': !hasValue(u.sn) }">{{ u.sn || EMPTY_MARK }}</td>
+                <td class="mono" :class="{ 'is-empty-cell': !hasValue(u.employeeID) }">{{ u.employeeID || EMPTY_MARK }}</td>
+                <td class="mono" :class="{ 'is-empty-cell': !hasValue(u.employeeType) }">{{ u.employeeType || EMPTY_MARK }}</td>
+                <td class="mono" :class="{ 'is-empty-cell': !hasValue(u.userPrincipalName) }">{{ u.userPrincipalName || EMPTY_MARK }}</td>
+                <td class="mono" :class="{ 'is-empty-cell': !parseLdapTime(userUpdatedAt(u)) }">
+                  {{ formatLdapTime(userUpdatedAt(u)) }}
+                </td>
                 <td>
                   <div class="group-cell">
                     <span
@@ -261,7 +283,7 @@
                     >
                       {{ cn }}
                     </span>
-                    <span v-if="!groupsByUser(u).length" class="muted">-</span>
+                    <span v-if="!groupsByUser(u).length" class="empty-mark">{{ EMPTY_MARK }}</span>
                   </div>
                 </td>
                 <td class="dn mono" :title="u.dn">{{ u.dn }}</td>
@@ -324,6 +346,7 @@ import {
 
 const users = shallowRef([]);
 const groups = shallowRef([]);
+const userToGroupCns = shallowRef(new Map());
 const ouTree = shallowRef([]);
 const loadingUsers = ref(false);
 const loadingGroups = ref(false);
@@ -348,6 +371,11 @@ const expandedOuDns = ref(new Set());
 const protectedUsernames = new Set(["krbtgt"]);
 const importInputRef = ref(null);
 const EMPTY_STR_LIST = Object.freeze([]);
+const EMPTY_MARK = "-";
+const MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024;
+const importLimitPerFileText = `${(MAX_IMPORT_FILE_BYTES / (1024 * 1024)).toFixed(0)} MB`;
+const importLimitTotalText = `${(MAX_IMPORT_TOTAL_BYTES / (1024 * 1024)).toFixed(0)} MB`;
 
 const ouTreeLines = computed(() => {
   const kw = ouKeyword.value.trim().toLowerCase();
@@ -403,25 +431,6 @@ const ouTreeLines = computed(() => {
   return collect(ouTree.value, 0, []).lines;
 });
 
-const userGroupListMap = computed(() => {
-  const out = new Map();
-  for (const g of groups.value) {
-    const cn = String(g?.cn || "").trim();
-    if (!cn) continue;
-    for (const memberDn of g?.members || []) {
-      const key = normalizeDn(memberDn);
-      if (!key) continue;
-      if (!out.has(key)) out.set(key, []);
-      const values = out.get(key);
-      if (!values.includes(cn)) values.push(cn);
-    }
-  }
-  for (const values of out.values()) {
-    values.sort((a, b) => a.localeCompare(b));
-  }
-  return out;
-});
-
 const filteredGroups = computed(() => {
   const kw = groupKeyword.value.toLowerCase();
   if (!kw) return groups.value.slice(0, 100);
@@ -429,29 +438,28 @@ const filteredGroups = computed(() => {
 });
 
 const filteredUsers = computed(() => {
-  let items = users.value;
-  if (selectedOuDn.value) {
-    const target = normalizeDn(selectedOuDn.value);
-    items = items.filter((u) => {
-      const parentDn = parentDnOfUser(u.dn || "");
-      return parentDn && normalizeDn(parentDn) === target;
-    });
-  }
-
-  if (selectedGroups.value.length) {
-    const targets = new Set(selectedGroups.value.map((g) => g.toLowerCase()));
-    items = items.filter((u) => {
-      const values = groupsByUser(u);
-      if (!values.length) return false;
-      return values.some((g) => targets.has(g.toLowerCase()));
-    });
-  }
-
+  const out = [];
+  const ouFilter = selectedOuDn.value ? normalizeDn(selectedOuDn.value) : "";
+  const groupTargets = selectedGroups.value.length
+    ? new Set(selectedGroups.value.map((g) => g.toLowerCase()))
+    : null;
   const kw = userKeyword.value.trim().toLowerCase();
-  if (kw) {
-    items = items.filter((u) => {
+
+  for (const u of users.value) {
+    if (ouFilter) {
+      const parentDn = parentDnOfUser(u.dn || "");
+      if (!parentDn || normalizeDn(parentDn) !== ouFilter) continue;
+    }
+
+    const userGroups = groupsByUser(u);
+    if (groupTargets) {
+      if (!userGroups.length) continue;
+      if (!userGroups.some((g) => groupTargets.has(g.toLowerCase()))) continue;
+    }
+
+    if (kw) {
       const ouPath = extractOuPathFromDn(u.dn || "");
-      const groupsText = groupsByUser(u).join(" ");
+      const groupsText = userGroups.join(" ");
       const fields = [
         u.sAMAccountName,
         u.displayName,
@@ -466,18 +474,21 @@ const filteredUsers = computed(() => {
         ouPath,
         groupsText,
       ];
-      return fields.some((value) => (value || "").toLowerCase().includes(kw));
-    });
+      if (!fields.some((value) => (value || "").toLowerCase().includes(kw))) continue;
+    }
+
+    out.push(u);
   }
 
-  const sorted = [...items].sort((a, b) => {
+  out.sort((a, b) => {
     const diff = parseLdapTime(userUpdatedAt(b)) - parseLdapTime(userUpdatedAt(a));
     if (diff !== 0) return diff;
     const ua = String(a?.sAMAccountName || "").toLowerCase();
     const ub = String(b?.sAMAccountName || "").toLowerCase();
     return ua.localeCompare(ub);
   });
-  return sorted;
+
+  return out;
 });
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / pageSize.value)));
@@ -548,6 +559,19 @@ function resolveUsername(user) {
   return user?.sAMAccountName || extractCnFromDn(user?.dn || "");
 }
 
+function compactOuTreeNodes(nodes) {
+  return (nodes || []).map((node) => ({
+    ou: String(node?.ou || ""),
+    dn: String(node?.dn || ""),
+    users: (node?.users || []).map((u) => ({
+      dn: String(u?.dn || ""),
+      sAMAccountName: String(u?.sAMAccountName || ""),
+      displayName: String(u?.displayName || ""),
+    })),
+    children: compactOuTreeNodes(node?.children || []),
+  }));
+}
+
 function userUpdatedAt(user) {
   return user?.whenChanged || user?.whenCreated || "";
 }
@@ -567,9 +591,17 @@ function parseLdapTime(value) {
   return Number.isFinite(ts) ? ts : 0;
 }
 
+function hasValue(value) {
+  return String(value ?? "").trim().length > 0;
+}
+
+function importNameValue(item) {
+  return [item?.first_name, item?.last_name].filter((v) => hasValue(v)).join(" ").trim();
+}
+
 function formatLdapTime(value) {
   const ts = parseLdapTime(value);
-  if (!ts) return "-";
+  if (!ts) return EMPTY_MARK;
   return new Date(ts).toLocaleString();
 }
 
@@ -581,7 +613,7 @@ function isProtectedUsername(username) {
 function groupsByUser(user) {
   const key = normalizeDn(user?.dn || "");
   if (!key) return EMPTY_STR_LIST;
-  return userGroupListMap.value.get(key) || EMPTY_STR_LIST;
+  return userToGroupCns.value.get(key) || EMPTY_STR_LIST;
 }
 
 function toggleGroup(cn, checked) {
@@ -604,6 +636,24 @@ function triggerImport() {
   importInputRef.value?.click();
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${value} B`;
+}
+
+function closeImportReport() {
+  const report = importReport.value;
+  if (report && Array.isArray(report.results)) {
+    // Explicitly clear large row buffers before dropping the reference.
+    report.results.length = 0;
+  }
+  importReport.value = null;
+  actionMessage.value = "";
+}
+
 function _downloadBlob(blob, filename) {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -620,7 +670,11 @@ async function onExportUsers() {
   error.value = "";
   actionMessage.value = "";
   try {
-    const { filename, blob } = await apiExportUsers();
+    const { filename, blob } = await apiExportUsers({
+      keyword: userKeyword.value,
+      ouDn: selectedOuDn.value,
+      groupCns: selectedGroups.value,
+    });
     _downloadBlob(blob, filename);
     actionMessage.value = `Export completed: ${filename}`;
   } catch (e) {
@@ -635,6 +689,21 @@ async function onImportFiles(event) {
   const files = Array.from(input?.files || []);
   if (!files.length) return;
 
+  const oversizedFiles = files.filter((f) => (f?.size || 0) > MAX_IMPORT_FILE_BYTES);
+  if (oversizedFiles.length) {
+    const names = oversizedFiles.map((f) => `${f.name} (${formatBytes(f.size)})`).join(", ");
+    error.value = `Import blocked: file exceeds ${formatBytes(MAX_IMPORT_FILE_BYTES)} limit. ${names}`;
+    if (input) input.value = "";
+    return;
+  }
+
+  const totalBytes = files.reduce((sum, f) => sum + (f?.size || 0), 0);
+  if (totalBytes > MAX_IMPORT_TOTAL_BYTES) {
+    error.value = `Import blocked: total size ${formatBytes(totalBytes)} exceeds ${formatBytes(MAX_IMPORT_TOTAL_BYTES)}.`;
+    if (input) input.value = "";
+    return;
+  }
+
   const confirmText = `Import ${files.length} file(s)? Existing same-name users will be skipped.`;
   if (!window.confirm(confirmText)) {
     if (input) input.value = "";
@@ -644,6 +713,7 @@ async function onImportFiles(event) {
   importing.value = true;
   error.value = "";
   actionMessage.value = "";
+  closeImportReport();
   try {
     const report = await apiImportUsers(files, {
       defaultGroupCn: "Students",
@@ -782,7 +852,20 @@ async function refreshUsers() {
   loadingUsers.value = true;
   error.value = "";
   try {
-    users.value = await apiListLdapUsers();
+    const payload = await apiListLdapUsers({ view: "list" });
+    // Keep only fields used by the Users page to reduce retained heap size.
+    users.value = (payload || []).map((u) => ({
+      dn: String(u?.dn || ""),
+      sAMAccountName: String(u?.sAMAccountName || ""),
+      displayName: String(u?.displayName || ""),
+      givenName: String(u?.givenName || ""),
+      sn: String(u?.sn || ""),
+      employeeID: String(u?.employeeID || ""),
+      employeeType: String(u?.employeeType || ""),
+      userPrincipalName: String(u?.userPrincipalName || ""),
+      whenCreated: String(u?.whenCreated || ""),
+      whenChanged: String(u?.whenChanged || ""),
+    }));
     selectedUsernames.value = selectedUsernames.value.filter((name) =>
       users.value.some((u) => resolveUsername(u) === name)
     );
@@ -797,7 +880,36 @@ async function refreshGroups() {
   loadingGroups.value = true;
   error.value = "";
   try {
-    groups.value = await apiListLdapGroups();
+    const payload = await apiListLdapGroups({ includeMembers: true, includeDescription: false });
+    const nextGroups = [];
+    const seenGroupCns = new Set();
+    const nextUserToGroupCns = new Map();
+
+    for (const g of payload || []) {
+      const cn = String(g?.cn || "").trim();
+      if (!cn) continue;
+
+      if (!seenGroupCns.has(cn)) {
+        seenGroupCns.add(cn);
+        nextGroups.push({ cn });
+      }
+
+      for (const memberDn of g?.members || []) {
+        const key = normalizeDn(memberDn);
+        if (!key) continue;
+        if (!nextUserToGroupCns.has(key)) nextUserToGroupCns.set(key, []);
+        const values = nextUserToGroupCns.get(key);
+        if (!values.includes(cn)) values.push(cn);
+      }
+    }
+
+    nextGroups.sort((a, b) => a.cn.localeCompare(b.cn));
+    for (const values of nextUserToGroupCns.values()) {
+      values.sort((a, b) => a.localeCompare(b));
+    }
+
+    groups.value = nextGroups;
+    userToGroupCns.value = nextUserToGroupCns;
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
@@ -809,7 +921,8 @@ async function refreshOuTree() {
   loadingOuTree.value = true;
   error.value = "";
   try {
-    const nextTree = await apiListLdapOuTree();
+    const payload = await apiListLdapOuTree({ includeUsers: true, userView: "tree" });
+    const nextTree = compactOuTreeNodes(payload);
     ouTree.value = nextTree;
     const allDns = new Set(collectOuDns(nextTree));
     const nextExpanded = new Set();
@@ -842,7 +955,7 @@ function goNextPage() {
 async function onWindowMessage(event) {
   if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== "USER_CREATED_OR_UPDATED") return;
-  actionMessage.value = `Saved user: ${event.data.username || "-"}`;
+  actionMessage.value = `Saved user: ${event.data.username || EMPTY_MARK}`;
   await refreshAll();
 }
 
@@ -860,6 +973,14 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener("message", onWindowMessage);
   document.removeEventListener("click", onClickOutside);
+  closeImportReport();
+  if (importInputRef.value) importInputRef.value.value = "";
+  users.value = [];
+  groups.value = [];
+  userToGroupCns.value = new Map();
+  ouTree.value = [];
+  selectedUsernames.value = [];
+  expandedOuDns.value = new Set();
 });
 
 watch([userKeyword, selectedOuDn, selectedGroups, pageSize], () => {
@@ -888,6 +1009,51 @@ watch(totalPages, (next) => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+.import-limit-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #d3dde8;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: help;
+  user-select: none;
+  line-height: 1;
+}
+.import-limit-help:hover,
+.import-limit-help:focus-visible {
+  background: #eef2f7;
+}
+.import-limit-tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(280px, 78vw);
+  padding: 8px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  z-index: 20;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.import-limit-help:hover .import-limit-tooltip,
+.import-limit-help:focus-visible .import-limit-tooltip {
+  opacity: 1;
+  transform: translateY(0);
 }
 .file-input-hidden {
   display: none;
@@ -1180,6 +1346,17 @@ watch(totalPages, (next) => {
   padding: 1px 8px;
   font-size: 12px;
   line-height: 1.4;
+}
+.empty-mark {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: center;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  color: #94a3b8;
+}
+.is-empty-cell {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif !important;
+  color: #94a3b8;
 }
 .table-wrap {
   flex: 1;

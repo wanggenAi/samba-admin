@@ -383,7 +383,7 @@ async function refreshGroups() {
   loadingGroups.value = true;
   error.value = "";
   try {
-    groups.value = await apiListLdapGroups();
+    groups.value = await apiListLdapGroups({ includeMembers: false, includeDescription: false });
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
@@ -395,7 +395,7 @@ async function refreshOuTree() {
   loadingOuTree.value = true;
   error.value = "";
   try {
-    ouTree.value = await apiListLdapOuTree();
+    ouTree.value = await apiListLdapOuTree({ includeUsers: false });
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import io
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
 from ..routers import ldap_guard
@@ -16,6 +16,25 @@ from ..services.users import (
 )
 
 router = APIRouter()
+MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024
+MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024
+
+
+async def _read_upload_with_limit(upload: UploadFile, max_size: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"file too large: {upload.filename or 'upload.txt'} (limit {max_size} bytes)",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @router.post("", response_model=UserAddResponse)
@@ -35,8 +54,18 @@ async def import_users(
     password_length: int = Form(default=12),
 ):
     loaded_files: list[tuple[str, bytes]] = []
+    total_size = 0
     for f in files:
-        raw = await f.read()
+        try:
+            raw = await _read_upload_with_limit(f, MAX_IMPORT_FILE_BYTES)
+        finally:
+            await f.close()
+        total_size += len(raw)
+        if total_size > MAX_IMPORT_TOTAL_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"total upload size too large (limit {MAX_IMPORT_TOTAL_BYTES} bytes)",
+            )
         loaded_files.append((f.filename or "upload.txt", raw))
 
     return ldap_guard(
@@ -49,8 +78,12 @@ async def import_users(
 
 
 @router.get("/export")
-def export_users():
-    data = ldap_guard(export_users_csv)
+def export_users(
+    keyword: str | None = Query(default=None, description="keyword filter from user list search"),
+    ou_dn: str | None = Query(default=None, description="OU DN filter"),
+    group_cn: list[str] | None = Query(default=None, description="group CN filters"),
+):
+    data = ldap_guard(lambda: export_users_csv(keyword=keyword, ou_dn=ou_dn, group_cns=group_cn or []))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"users-export-{stamp}.csv"
     return StreamingResponse(

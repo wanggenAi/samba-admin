@@ -438,13 +438,13 @@ function prefillFromUser(user) {
 }
 
 async function refreshUsers() {
-  users.value = await apiListLdapUsers();
+  users.value = await apiListLdapUsers({ view: "list" });
 }
 
 async function refreshGroups() {
   loadingGroups.value = true;
   try {
-    groups.value = await apiListLdapGroups();
+    groups.value = await apiListLdapGroups({ includeMembers: true, includeDescription: false });
   } finally {
     loadingGroups.value = false;
   }
@@ -453,7 +453,7 @@ async function refreshGroups() {
 async function refreshOuTree() {
   loadingOuTree.value = true;
   try {
-    ouTree.value = await apiListLdapOuTree();
+    ouTree.value = await apiListLdapOuTree({ includeUsers: false });
   } finally {
     loadingOuTree.value = false;
   }

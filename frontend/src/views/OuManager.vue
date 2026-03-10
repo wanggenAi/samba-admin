@@ -277,7 +277,7 @@ async function refreshOuTree() {
   loadingOuTree.value = true;
   error.value = "";
   try {
-    const nextTree = await apiListLdapOuTree();
+    const nextTree = await apiListLdapOuTree({ includeUsers: true, userView: "tree" });
     ouTree.value = nextTree;
     const allDns = new Set(collectOuDns(nextTree));
     const nextExpanded = new Set();
