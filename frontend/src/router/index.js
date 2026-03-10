@@ -5,6 +5,7 @@ import Versions from "../views/Versions.vue";
 import Users from "../views/Users.vue";
 import UserCreate from "../views/UserCreate.vue";
 import UserEdit from "../views/UserEdit.vue";
+import OuManager from "../views/OuManager.vue";
 
 const routes = [
     { path: "/", redirect: "/dashboard" },
@@ -14,6 +15,7 @@ const routes = [
     { path: "/users", component: Users },
     { path: "/users/new", component: UserCreate },
     { path: "/users/edit/:username", component: UserEdit },
+    { path: "/ous", component: OuManager },
 ];
 
 export default createRouter({

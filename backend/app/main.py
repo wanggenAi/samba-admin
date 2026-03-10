@@ -10,7 +10,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
     )
 
-    # CORS：开发阶段允许前端访问（生产再收紧）
+    # CORS: allow frontend access during development (tighten in production)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

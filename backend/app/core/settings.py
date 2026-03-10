@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# 加载 .env（本地开发用；服务器建议用 systemd EnvironmentFile 或环境变量注入）
+# Load .env for local development; in production prefer systemd EnvironmentFile or injected env vars
 load_dotenv()
 
 
@@ -27,13 +27,13 @@ def _bool(val: Optional[str], default: bool = False) -> bool:
 
 
 class SambaSettings(BaseModel):
-    # AD DC 模式下：使用 samba-ad-dc 这个服务（不是 smbd）
+    # In AD DC mode, use samba-ad-dc service (not smbd)
     service_name: str = os.getenv("SAMBA_SERVICE", "samba-ad-dc")
 
-    # Ubuntu AD DC 默认 smb.conf 路径（通常还是这个）
+    # Default smb.conf path on Ubuntu AD DC (commonly this path)
     smb_conf_path: Path = Path(os.getenv("SAMBA_CONF", "/etc/samba/smb.conf"))
 
-    # 版本备份目录（默认 backend/app/data/versions）
+    # Version backup directory (defaults to backend/app/data/versions)
     data_dir: Path = Path(
         os.getenv("APP_DATA_DIR", str(Path(__file__).resolve().parents[1] / "data"))
     )
@@ -41,18 +41,18 @@ class SambaSettings(BaseModel):
         os.getenv("APP_VERSIONS_DIR", str(Path(__file__).resolve().parents[1] / "data" / "versions"))
     )
 
-    # Jinja2 模板目录（默认 backend/templates）
+    # Jinja2 templates directory (defaults to backend/templates)
     templates_dir: Path = Path(
         os.getenv("SAMBA_TEMPLATES_DIR", str(Path(__file__).resolve().parents[2] / "templates"))
     )
 
-    # 临时生成配置文件位置
+    # Temporary generated config file path
     tmp_conf_path: Path = Path(os.getenv("SAMBA_TMP_CONF", "/tmp/smb.conf.generated"))
 
-    # 校验配置命令（AD DC 也可以用 testparm）
+    # Config validation command (testparm also works for AD DC)
     testparm_cmd: str = os.getenv("SAMBA_TESTPARM", "testparm")
 
-    # 是否允许写 smb.conf / reload（生产环境默认 false）
+    # Whether writing smb.conf / reload is allowed (default false in production)
     allow_apply: bool = _bool(os.getenv("ALLOW_APPLY"), default=False)
 
     def ensure_dirs(self) -> None:
@@ -61,38 +61,38 @@ class SambaSettings(BaseModel):
 
 
 class LdapSettings(BaseModel):
-    # 你的 AD DC 机器 IP（Ubuntu 这台）
+    # AD DC host IP (this Ubuntu server)
     host: str = os.getenv("LDAP_HOST", "10.211.55.10")
 
-    # AD 的 LDAP：389（LDAP）/ 636（LDAPS）
+    # AD LDAP ports: 389 (LDAP) / 636 (LDAPS)
     port: int = int(os.getenv("LDAP_PORT", "389"))
 
-    # 是否使用 SSL（LDAPS 636）
+    # Whether to use SSL (LDAPS 636)
     use_ssl: bool = _bool(os.getenv("LDAP_USE_SSL"), default=False)
 
-    # StartTLS（通常是 389 上升级加密；和 use_ssl 二选一）
-    # 兼容 LDAP_STARTTLS / LDAP_START_TLS 两种写法
+    # StartTLS (typically upgrade encryption on 389; mutually exclusive with use_ssl)
+    # Support both LDAP_STARTTLS and LDAP_START_TLS env names
     start_tls: bool = _bool(
         os.getenv("LDAP_START_TLS", os.getenv("LDAP_STARTTLS")),
         default=False,
     )
 
-    # 是否跳过证书校验（实验环境常用；生产环境建议 false + 正确证书）
+    # Whether to skip cert verification (common in labs; use false + proper certs in production)
     tls_skip_verify: bool = _bool(os.getenv("LDAP_TLS_SKIP_VERIFY"), default=True)
 
-    # AD bind 用户（你现在用的是 UPN）
+    # AD bind user (currently using UPN)
     bind_user: str = os.getenv("LDAP_BIND_USER", "Administrator@EVMS.BSTU.EDU")
 
-    # 部署时用环境变量注入（不要写死）
+    # Inject via environment variables in deployment (do not hardcode)
     bind_password: str = os.getenv("LDAP_BIND_PASSWORD", "")
 
-    # 根 DN
+    # Base DN
     base_dn: str = os.getenv("LDAP_BASE_DN", "DC=evms,DC=bstu,DC=edu")
 
-    # 用户默认创建容器；留空时使用 CN=Users,<base_dn>
+    # Default user container; when empty use CN=Users,<base_dn>
     user_container_dn: Optional[str] = os.getenv("LDAP_USER_CONTAINER_DN") or None
 
-    # 用户 UPN 后缀；留空时从 base_dn 推导
+    # User UPN suffix; derive from base_dn when empty
     user_upn_suffix: Optional[str] = os.getenv("LDAP_USER_UPN_SUFFIX") or None
 
     def normalized(self) -> "LdapSettings":

@@ -58,7 +58,7 @@
             v-model.trim="ouKeyword"
             class="combo-input"
             type="text"
-            placeholder="Type to search OU path, Enter to set"
+            placeholder='Type OU path (e.g. Students > ms > 63/24 or ms-63/24), Enter to set'
             @focus="ouDropdownOpen = true"
             @keydown.enter.prevent="applyTypedOuPath"
             @keydown.esc="ouDropdownOpen = false"
@@ -179,6 +179,14 @@ const ouKeyword = ref("");
 const selectedOuPath = ref("");
 const ouDropdownOpen = ref(false);
 const ouInputRef = ref(null);
+const OU_PATH_SEPARATOR = ">";
+const GROUP_CODE_MAP = {
+  "МС": "ms",
+  "ПЭ": "pe",
+  "Э": "e",
+  "КС": "ks",
+  "ИИ": "ii",
+};
 
 const form = ref({
   username: "",
@@ -207,7 +215,7 @@ const ouPathOptions = computed(() => {
   const walk = (nodes, path) => {
     for (const node of nodes || []) {
       const currentPath = [...path, node.ou];
-      out.push(currentPath.join("/"));
+      out.push(currentPath.join(` ${OU_PATH_SEPARATOR} `));
       walk(node.children || [], currentPath);
     }
   };
@@ -272,10 +280,28 @@ function focusOuInput() {
 
 function parseOuPath(raw) {
   if (!raw) return [];
-  return raw
-    .split("/")
-    .map((v) => v.trim())
-    .filter(Boolean);
+  const value = String(raw).trim();
+  if (!value) return [];
+
+  if (value.includes(OU_PATH_SEPARATOR)) {
+    return value
+      .split(/\s*>\s*/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+
+  // Script-style shorthand: groupCode-groupNumber -> Students ; code ; number
+  const m = value.match(/^([^-]+)-(.+)$/);
+  if (m) {
+    const rawCode = m[1].trim();
+    const rawNumber = m[2].trim();
+    const mappedCode = GROUP_CODE_MAP[rawCode.toUpperCase()] || rawCode.toLowerCase();
+    if (mappedCode && rawNumber) {
+      return ["Students", mappedCode, rawNumber];
+    }
+  }
+
+  return [value];
 }
 
 function closeWindow() {

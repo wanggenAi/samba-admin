@@ -1,70 +1,102 @@
 # Samba Admin Console
 
-A lightweight web-based management system for Samba (including AD DC mode).
+LDAP-first web console for AD/Samba environments.
 
-## What it does
+## Current project status
 
-- Check Samba service status
-- Validate generated `smb.conf` with `testparm`
-- Apply config with automatic backup and rollback support
-- Manage AD users/groups via `samba-tool` and LDAP
+This repository currently runs in **LDAP-only mode** for user and OU management.
+
+- Fully available:
+  - LDAP health check
+  - User list/search/filter/delete
+  - User create and edit
+  - OU tree browse/create/rename/delete
+  - Group listing and group-based user filtering
+- Disabled placeholders (by design in current code):
+  - Samba config validate/apply APIs (`/api/config/*` -> `501`)
+  - Version rollback APIs (`/api/versions/{id}/rollback` -> `501`, list returns `[]`)
 
 ## Architecture
 
 ```
-Browser (Vue + Vite)
-    -> FastAPI backend
-    -> systemctl / testparm / samba-tool / LDAP
-    -> Samba
+Browser (Vue 3 + Vite)
+  -> FastAPI backend
+  -> LDAP (ldap3)
+  -> Active Directory / Samba AD DC
 ```
 
-## Requirements
+## Tech stack
 
-- Ubuntu 24.04 LTS (server)
-- Python 3.10+
-- Node.js 18+ (frontend build)
-- Git
+- Backend: FastAPI, ldap3, Pydantic v2
+- Frontend: Vue 3, Vue Router, Vite
+- Runtime: Python 3.10+, Node.js 18+
 
-## 1. Install Samba on server
+## Features implemented
 
-```bash
-sudo apt update
-sudo apt install samba -y
-```
+### Dashboard
+- LDAP connectivity check (`/api/ldap/health`)
+- Shows host, port, base DN, SSL/StartTLS state
 
-For AD DC mode (default in this backend), service name is usually `samba-ad-dc`:
+### Users page
+- OU tree panel with expand/collapse and search (OU/user/DN)
+- User list with pagination
+- Username column stays visible while horizontal scrolling (sticky column)
+- Group column shows memberships per user
+- Group filter is **multi-select OR logic**
+- Text search includes username/display name/UPN/DN/OU path/groups
+- Batch delete selected users
+- Protected account guard: `krbtgt` cannot be deleted
 
-```bash
-sudo systemctl enable samba-ad-dc
-sudo systemctl start samba-ad-dc
-sudo systemctl status samba-ad-dc
-```
+### User create/edit
+- Create and update use the same API: `POST /api/users`
+- Create requires password
+- Edit can leave password blank to keep current password
+- Paid flag validation: only `"$"` or empty
+- OU path single-select input with path parsing rules (see below)
+- Groups multi-select (adds memberships)
+- Success toast/mask display duration aligned to current UI behavior
 
-If your server uses classic file service mode, set `SAMBA_SERVICE=smbd` in environment.
+### OU manager (`/ous`)
+- Separate workspace route for OU operations
+- Create OU under selected parent (or base DN)
+- Rename selected OU
+- Delete OU:
+  - tries non-recursive delete first
+  - if OU not empty, prompts for recursive delete
+- Tree includes OU and user nodes for context
 
-## 2. Backend setup
+## OU path input rules
+
+Used in user create/edit and documented in OU Manager:
+
+1. Preferred separator is `>` for levels  
+   Example: `Students > ms > 63/24`
+2. Script-style shorthand is supported  
+   Example: `ms-63/24` -> `Students > ms > 63/24`
+3. Single value is treated as one OU level
+4. Do **not** use `/` or `;` as level separators
+5. `/` can be part of OU name (for example `63/24`)
+
+## Backend setup
 
 ```bash
 cd backend
-sudo apt install python3-venv -y
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 3. Backend environment variables
-
 Create `backend/.env` (example):
 
 ```env
-# Samba
+# Samba (kept for compatibility; Samba APIs are disabled in current mode)
 SAMBA_SERVICE=samba-ad-dc
 SAMBA_CONF=/etc/samba/smb.conf
 SAMBA_TESTPARM=testparm
 ALLOW_APPLY=false
 
-# LDAP
-LDAP_HOST=10.211.55.10
+# LDAP connection
+LDAP_HOST=127.0.0.1
 LDAP_PORT=389
 LDAP_USE_SSL=false
 LDAP_START_TLS=false
@@ -72,81 +104,129 @@ LDAP_TLS_SKIP_VERIFY=true
 LDAP_BIND_USER=Administrator@EXAMPLE.COM
 LDAP_BIND_PASSWORD=change_me
 LDAP_BASE_DN=DC=example,DC=com
+
+# Optional
+# LDAP_USER_CONTAINER_DN=CN=Users,DC=example,DC=com
+# LDAP_USER_UPN_SUFFIX=example.com
 ```
 
-## 4. Run backend manually
+Important:
+- `LDAP_BIND_PASSWORD` must be set, otherwise LDAP APIs return `400`.
+- `LDAP_USE_SSL=true` and `LDAP_START_TLS=true` are mutually exclusive; SSL wins.
 
-From `backend/`:
+Run backend:
 
 ```bash
-sudo -E .venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Health check:
+Checks:
 
 ```bash
-curl http://SERVER_IP:8000/health
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/api/ldap/health
 ```
 
-## 5. Deploy as systemd service (recommended)
+OpenAPI docs:
+- `http://127.0.0.1:8000/docs`
 
-Create `/etc/systemd/system/samba-admin.service`:
-
-```ini
-[Unit]
-Description=Samba Admin FastAPI Service
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/home/YOUR_USER/samba-admin/backend
-EnvironmentFile=/home/YOUR_USER/samba-admin/backend/.env
-ExecStart=/home/YOUR_USER/samba-admin/backend/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable samba-admin
-sudo systemctl start samba-admin
-sudo systemctl status samba-admin
-```
-
-## 6. Frontend build
+## Frontend setup
 
 ```bash
 cd frontend
 npm install
-npm run build
 ```
 
-This produces `frontend/dist/`. Deploy it with your preferred web serving strategy.
+Development API target (optional, default already points to localhost:8000):
 
-## Security notes (important)
+```bash
+echo "VITE_API_TARGET=http://localhost:8000" > .env.development
+```
 
-- Do not expose this API directly to the public internet.
-- Keep `ALLOW_APPLY=false` by default; enable only on trusted admin hosts.
-- Restrict CORS origins in production (avoid wildcard origins).
-- Set strong `LDAP_BIND_PASSWORD` via environment, never hardcode in code.
-- Run behind a reverse proxy with TLS and authentication.
+Run frontend dev server:
 
-## Data and backups
+```bash
+npm run dev
+```
 
-- Config backups: `backend/app/data/versions/`
-- Last apply payload snapshot: `backend/app/data/last_apply.json`
+Build frontend:
 
-## API quick check
+```bash
+npm run build
+npm run preview
+```
 
+## API quick reference
+
+### Health and LDAP
 - `GET /health`
-- `GET /api/system/status`
-- `POST /api/config/validate`
-- `POST /api/config/apply` (requires `ALLOW_APPLY=true`)
-- `GET /api/versions/`
-- `POST /api/versions/{id}/rollback`
 - `GET /api/ldap/health`
+- `GET /api/ldap/users`
+- `GET /api/ldap/groups`
+- `GET /api/ldap/tree`
+- `GET /api/ldap/ou-tree`
+
+### OU operations
+- `POST /api/ldap/ou`
+  - body: `{ "name": "63/24", "parent_dn": "OU=ms,OU=Students,DC=example,DC=com" }`
+- `PATCH /api/ldap/ou`
+  - body: `{ "dn": "OU=old,OU=Students,DC=example,DC=com", "new_name": "new" }`
+- `DELETE /api/ldap/ou?dn=...&recursive=false|true`
+
+### User operations
 - `POST /api/users`
+  - create new user if username not found
+  - overwrite/update existing user if found
+- `DELETE /api/users/{username}`
+
+Create user example:
+
+```json
+{
+  "username": "u10001",
+  "password": "Test@123456",
+  "student_id": "2026001",
+  "russian_name": "Ivan Ivanov",
+  "pinyin_name": "Zhang San",
+  "paid_flag": "$",
+  "groups": ["Domain Admins"],
+  "ou_path": ["Students", "ms", "63/24"]
+}
+```
+
+Edit user example (keep password unchanged):
+
+```json
+{
+  "username": "u10001",
+  "password": null,
+  "student_id": "2026001",
+  "russian_name": "Ivan Ivanov",
+  "pinyin_name": "Zhang San",
+  "paid_flag": null,
+  "groups": ["Domain Users"],
+  "ou_path": ["Students", "ms", "63/24"]
+}
+```
+
+### Samba/config placeholders (current behavior)
+- `GET /api/system/status` -> returns `ldap-only` mode status
+- `POST /api/config/validate` -> `501`
+- `POST /api/config/apply` -> `501`
+- `GET /api/versions/` -> `[]`
+- `POST /api/versions/{id}/rollback` -> `501`
+
+## Known behavior and limitations
+
+- Group updates are additive (`add member`) in current backend flow.
+- Group removal is not automatically applied when a group is unselected in edit UI.
+- CORS is currently permissive (`allow_origins=["*"]`) for development convenience.
+
+## Security notes
+
+- Do not expose this API directly to the public Internet.
+- Use TLS and authentication at reverse proxy level.
+- Keep LDAP bind credentials in environment variables only.
+- In production, set strict CORS origins.

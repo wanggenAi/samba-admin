@@ -728,6 +728,8 @@ watch(totalPages, (next) => {
   min-height: 520px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 .panel-head {
   display: flex;
@@ -740,6 +742,7 @@ watch(totalPages, (next) => {
   display: grid;
   grid-template-columns: 1fr;
   gap: 8px;
+  min-width: 0;
 }
 .panel-head h3 {
   margin: 0;
@@ -756,12 +759,15 @@ watch(totalPages, (next) => {
   justify-content: flex-start;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 .tree-tools {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .tree-tool-btn {
   height: 24px;
@@ -774,10 +780,14 @@ watch(totalPages, (next) => {
 }
 .tree-search-row {
   display: block;
+  min-width: 0;
+  padding: 0;
 }
 .tree-search-input {
-  width: 100%;
-  max-width: none;
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
 }
 .list-head {
   align-items: start;
@@ -827,6 +837,7 @@ watch(totalPages, (next) => {
   width: 320px;
   max-width: 33vw;
   height: 36px;
+  box-sizing: border-box;
   border: 1px solid #cfd8e3;
   border-radius: 10px;
   padding: 0 12px;

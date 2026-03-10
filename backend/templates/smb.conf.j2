@@ -3,11 +3,11 @@
    workgroup = EVMS
    realm = EVMS.BSTU.EDU
 
-   # 建议：AD DC 用内部 DNS
+   # Recommended: use internal DNS for AD DC
    dns forwarder = 8.8.8.8
    idmap_ldb:use rfc2307 = yes
 
-   # 兼容性
+   # Compatibility
    server string = Samba AD DC
    security = user
 

@@ -22,7 +22,18 @@
         </label>
         <label>
           Password
-          <input v-model="form.password" type="password" placeholder="Enter new password" />
+          <div class="password-row">
+            <input
+              v-model="form.password"
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Leave blank to keep current password"
+              autocomplete="new-password"
+            />
+            <button class="btn" type="button" @click="showPassword = !showPassword">
+              {{ showPassword ? "Hide" : "Show" }}
+            </button>
+          </div>
+          <span class="muted">Current password cannot be read from LDAP/AD. You can only set a new one.</span>
           <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
         </label>
         <label>
@@ -59,7 +70,7 @@
             v-model.trim="ouKeyword"
             class="combo-input"
             type="text"
-            placeholder="Type to search OU path, Enter to set"
+            placeholder='Type OU path (e.g. Students > ms > 63/24 or ms-63/24), Enter to set'
             @focus="ouDropdownOpen = true"
             @keydown.enter.prevent="applyTypedOuPath"
             @keydown.esc="ouDropdownOpen = false"
@@ -175,6 +186,7 @@ const error = ref("");
 const fieldErrors = ref({});
 const submitMessage = ref("");
 const submitPhase = ref("idle");
+const showPassword = ref(false);
 
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
@@ -185,6 +197,14 @@ const ouKeyword = ref("");
 const selectedOuPath = ref("");
 const ouDropdownOpen = ref(false);
 const ouInputRef = ref(null);
+const OU_PATH_SEPARATOR = ">";
+const GROUP_CODE_MAP = {
+  "МС": "ms",
+  "ПЭ": "pe",
+  "Э": "e",
+  "КС": "ks",
+  "ИИ": "ii",
+};
 
 const form = ref({
   username,
@@ -213,7 +233,7 @@ const ouPathOptions = computed(() => {
   const walk = (nodes, path) => {
     for (const node of nodes || []) {
       const currentPath = [...path, node.ou];
-      out.push(currentPath.join("/"));
+      out.push(currentPath.join(` ${OU_PATH_SEPARATOR} `));
       walk(node.children || [], currentPath);
     }
   };
@@ -249,7 +269,7 @@ function extractOuPathFromDn(dn) {
     const p = part.trim();
     if (p.toUpperCase().startsWith("OU=")) ous.push(p.slice(3));
   }
-  return ous.reverse().join("/");
+  return ous.reverse().join(` ${OU_PATH_SEPARATOR} `);
 }
 
 function pickGroup(cn) {
@@ -296,10 +316,28 @@ function focusOuInput() {
 
 function parseOuPath(raw) {
   if (!raw) return [];
-  return raw
-    .split("/")
-    .map((v) => v.trim())
-    .filter(Boolean);
+  const value = String(raw).trim();
+  if (!value) return [];
+
+  if (value.includes(OU_PATH_SEPARATOR)) {
+    return value
+      .split(/\s*>\s*/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+  }
+
+  // Script-style shorthand: groupCode-groupNumber -> Students ; code ; number
+  const m = value.match(/^([^-]+)-(.+)$/);
+  if (m) {
+    const rawCode = m[1].trim();
+    const rawNumber = m[2].trim();
+    const mappedCode = GROUP_CODE_MAP[rawCode.toUpperCase()] || rawCode.toLowerCase();
+    if (mappedCode && rawNumber) {
+      return ["Students", mappedCode, rawNumber];
+    }
+  }
+
+  return [value];
 }
 
 function closeWindow() {
@@ -472,6 +510,14 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
   gap: 10px;
+}
+.password-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.password-row input {
+  flex: 1;
 }
 label {
   display: grid;

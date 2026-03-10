@@ -154,6 +154,147 @@ class LdapService:
             parent_dn = ou_dn
         return parent_dn
 
+    def create_ou(self, conn: ldap3.Connection, name: str, parent_dn: Optional[str] = None) -> tuple[str, bool]:
+        ou_name = name.strip()
+        if not ou_name:
+            raise LDAPException("ou name cannot be empty")
+
+        target_parent_dn = parent_dn.strip() if parent_dn else self.cfg.base_dn
+        if not self._entry_exists_dn(conn, target_parent_dn):
+            raise LDAPException(f"parent DN not found: {target_parent_dn}")
+
+        ou_dn = f"OU={ldap3.utils.dn.escape_rdn(ou_name)},{target_parent_dn}"
+        if self._entry_exists_dn(conn, ou_dn):
+            return ou_dn, False
+
+        ok = conn.add(
+            ou_dn,
+            object_class=["top", "organizationalUnit"],
+            attributes={"ou": ou_name},
+        )
+        if not ok:
+            result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+            if result_code == 68:  # entryAlreadyExists
+                return ou_dn, False
+            raise LDAPException(f"create OU failed: {conn.result}")
+
+        return ou_dn, True
+
+    def rename_ou(self, conn: ldap3.Connection, ou_dn: str, new_name: str) -> str:
+        source_dn = ou_dn.strip()
+        target_name = new_name.strip()
+        if not source_dn:
+            raise LDAPException("ou DN cannot be empty")
+        if not target_name:
+            raise LDAPException("new OU name cannot be empty")
+        if source_dn.lower() == self.cfg.base_dn.lower():
+            raise LDAPException("cannot rename base DN")
+
+        ok = conn.search(
+            search_base=source_dn,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.BASE,
+            attributes=["objectClass", "distinguishedName"],
+        )
+        if not ok or not conn.entries:
+            raise LDAPException(f"OU not found: {source_dn}")
+
+        classes = self._entry_object_classes(conn.entries[0])
+        if "organizationalunit" not in classes:
+            raise LDAPException(f"target is not an OU: {source_dn}")
+
+        parts = source_dn.split(",", 1)
+        if len(parts) != 2:
+            raise LDAPException(f"invalid OU DN: {source_dn}")
+        parent_dn = parts[1]
+        new_rdn = f"OU={ldap3.utils.dn.escape_rdn(target_name)}"
+        target_dn = f"{new_rdn},{parent_dn}"
+
+        if source_dn.lower() == target_dn.lower():
+            return source_dn
+
+        if self._entry_exists_dn(conn, target_dn):
+            raise LDAPException(f"target DN already exists: {target_dn}")
+
+        ok = conn.modify_dn(
+            dn=source_dn,
+            relative_dn=new_rdn,
+            delete_old_dn=True,
+        )
+        if not ok:
+            result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+            if result_code == 68:
+                raise LDAPException(f"target DN already exists: {target_dn}")
+            if result_code == 50:
+                raise LDAPException(f"insufficient access rights to rename OU: {source_dn}")
+            raise LDAPException(f"rename OU failed: {conn.result}")
+
+        # AD updates descendants DNs automatically on parent rename/move.
+        return target_dn
+
+    def _entry_object_classes(self, entry: object) -> Set[str]:
+        raw = getattr(entry, "objectClass", []) if hasattr(entry, "objectClass") else []
+        return {str(x).lower() for x in raw}
+
+    def delete_ou(self, conn: ldap3.Connection, ou_dn: str, recursive: bool = False) -> int:
+        dn = ou_dn.strip()
+        if not dn:
+            raise LDAPException("ou DN cannot be empty")
+        if dn.lower() == self.cfg.base_dn.lower():
+            raise LDAPException("cannot delete base DN")
+
+        ok = conn.search(
+            search_base=dn,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.BASE,
+            attributes=["objectClass", "distinguishedName"],
+        )
+        if not ok or not conn.entries:
+            raise LDAPException(f"OU not found: {dn}")
+
+        classes = self._entry_object_classes(conn.entries[0])
+        if "organizationalunit" not in classes:
+            raise LDAPException(f"target is not an OU: {dn}")
+
+        ok = conn.search(
+            search_base=dn,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.LEVEL,
+            attributes=["distinguishedName"],
+        )
+        children_dns = [str(getattr(e, "distinguishedName", "")) for e in conn.entries if str(getattr(e, "distinguishedName", ""))]
+        if children_dns and not recursive:
+            raise LDAPException("OU is not empty; recursive delete required")
+
+        if not recursive:
+            if not conn.delete(dn):
+                raise LDAPException(f"delete OU failed: {conn.result}")
+            return 1
+
+        # Subtree delete (leaf-first): fetch all descendants + root and delete by depth.
+        ok = conn.search(
+            search_base=dn,
+            search_filter="(objectClass=*)",
+            search_scope=ldap3.SUBTREE,
+            attributes=["distinguishedName"],
+        )
+        if not ok:
+            raise LDAPException(f"read OU subtree failed: {conn.result}")
+
+        dns = [str(getattr(e, "distinguishedName", "")) for e in conn.entries if str(getattr(e, "distinguishedName", ""))]
+        ordered_dns = sorted(set(dns), key=lambda x: x.count(","), reverse=True)
+
+        deleted = 0
+        for child_dn in ordered_dns:
+            if not conn.delete(child_dn):
+                result_code = int(conn.result.get("result", -1)) if isinstance(conn.result, dict) else -1
+                if result_code == 32:
+                    continue
+                raise LDAPException(f"delete subtree entry failed: {child_dn} => {conn.result}")
+            deleted += 1
+
+        return deleted
+
     def create_user(
         self,
         conn: ldap3.Connection,
@@ -423,8 +564,8 @@ class LdapService:
 
     def _fetch_users_by_dn(self, dns: List[str]) -> Dict[str, LdapUser]:
         """
-        按 DN 批量查用户信息。
-        注意：LDAP filter 长度有限，DN 很多时需要分批。
+        Batch-fetch user information by DN.
+        Note: LDAP filters have length limits, so query in batches for large DN sets.
         """
         with self.connection() as conn:
             out: Dict[str, LdapUser] = {}
@@ -452,7 +593,7 @@ class LdapService:
 
     def build_group_tree(self, root_group_cn: Optional[str] = None) -> List[GroupTreeNode]:
         """
-        按“组嵌套关系”构建树。
+        Build a tree based on nested group memberships.
         """
         groups = self.list_groups()
         dn_to_group: Dict[str, LdapGroup] = {g.dn: g for g in groups if g.dn}

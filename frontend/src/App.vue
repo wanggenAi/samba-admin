@@ -6,6 +6,7 @@
       <nav class="nav">
         <RouterLink to="/dashboard">Dashboard</RouterLink>
         <RouterLink to="/users">Users</RouterLink>
+        <RouterLink to="/ous">OUs</RouterLink>
       </nav>
     </header>
 

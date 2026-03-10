@@ -7,13 +7,20 @@ from pydantic import BaseModel, Field, field_validator
 
 class UserAddRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=256)
+    password: Optional[str] = Field(default=None, max_length=256)
     student_id: str = Field(min_length=1, max_length=64)
     russian_name: str = Field(min_length=1, max_length=128)
     pinyin_name: str = Field(min_length=1, max_length=128)
     paid_flag: Optional[str] = None
     groups: list[str] = Field(default_factory=list)
     ou_path: list[str] = Field(default_factory=list)
+
+    @staticmethod
+    def _strip_or_none(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        v = value.strip()
+        return v or None
 
     @field_validator("username")
     @classmethod
@@ -34,14 +41,17 @@ class UserAddRequest(BaseModel):
     @field_validator("paid_flag")
     @classmethod
     def _validate_paid_flag(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        v = value.strip()
-        if v == "":
+        v = cls._strip_or_none(value)
+        if v is None:
             return None
         if v != "$":
             raise ValueError("paid_flag must be '$' or empty")
         return v
+
+    @field_validator("password")
+    @classmethod
+    def _normalize_password(cls, value: Optional[str]) -> Optional[str]:
+        return cls._strip_or_none(value)
 
     @field_validator("groups")
     @classmethod

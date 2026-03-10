@@ -78,6 +78,26 @@ export function apiListLdapOuTree() {
     return request("/api/ldap/ou-tree");
 }
 
+export function apiCreateLdapOu(payload) {
+    return request("/api/ldap/ou", {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+}
+
+export function apiDeleteLdapOu(dn, recursive = false) {
+    return request(`/api/ldap/ou?dn=${encodeURIComponent(dn)}&recursive=${recursive ? "true" : "false"}`, {
+        method: "DELETE",
+    });
+}
+
+export function apiRenameLdapOu(dn, new_name) {
+    return request("/api/ldap/ou", {
+        method: "PATCH",
+        body: JSON.stringify({ dn, new_name }),
+    });
+}
+
 export function apiAddUser(payload) {
     return request("/api/users", {
         method: "POST",

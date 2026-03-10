@@ -25,10 +25,10 @@ class ConfigModel(BaseModel):
 
 # =========================
 # LDAP Models (AD DC)
-# 说明：
-# - 保留你现有字段名：sAMAccountName / displayName / userPrincipalName
-# - 增加 start_tls / tls_skip_verify 以支持 389+StartTLS 或 636+LDAPS
-# - 修复 list 默认值用 [] 的坑（改 default_factory）
+# Notes:
+# - Keep existing field names: sAMAccountName / displayName / userPrincipalName
+# - Add start_tls / tls_skip_verify to support 389+StartTLS or 636+LDAPS
+# - Avoid mutable [] defaults for lists (use default_factory)
 # =========================
 
 class LdapConfig(BaseModel):
@@ -38,10 +38,10 @@ class LdapConfig(BaseModel):
     # LDAPS: use_ssl=True (usually port 636)
     use_ssl: bool = False
 
-    # LDAP 389 + StartTLS（如果 AD 强制加密/签名，常用这个）
+    # LDAP 389 + StartTLS (commonly used if AD enforces encryption/signing)
     start_tls: bool = False
 
-    # 实验环境：通常是自签证书，先跳过校验
+    # Lab/dev environments often use self-signed certs; skip verify for now
     tls_skip_verify: bool = True
 
     bind_user: str = "Administrator@EVMS.BSTU.EDU"
