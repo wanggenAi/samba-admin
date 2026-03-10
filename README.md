@@ -179,17 +179,18 @@ npm run preview
 - `POST /api/users`
   - create new user if username not found
   - overwrite/update existing user if found
+  - if `username` is omitted on create, backend auto-generates it
 - `DELETE /api/users/{username}`
 
 Create user example:
 
 ```json
 {
-  "username": "u10001",
   "password": "Test@123456",
   "student_id": "2026001",
-  "russian_name": "Ivan Ivanov",
-  "pinyin_name": "Zhang San",
+  "first_name": "Ivan",
+  "last_name": "Ivanov",
+  "display_name": "Ivan Ivanov",
   "paid_flag": "$",
   "groups": ["Domain Admins"],
   "ou_path": ["Students", "ms", "63/24"]
@@ -203,8 +204,9 @@ Edit user example (keep password unchanged):
   "username": "u10001",
   "password": null,
   "student_id": "2026001",
-  "russian_name": "Ivan Ivanov",
-  "pinyin_name": "Zhang San",
+  "first_name": "Ivan",
+  "last_name": "Ivanov",
+  "display_name": "Ivan Ivanov",
   "paid_flag": null,
   "groups": ["Domain Users"],
   "ou_path": ["Students", "ms", "63/24"]

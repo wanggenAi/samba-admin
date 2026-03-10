@@ -12,17 +12,44 @@
           {{ submitting ? "Submitting..." : "Submit" }}
         </button>
       </div>
+      <details class="username-help">
+        <summary>Username rule</summary>
+        <div class="muted">
+          Username is optional. If left blank, it is auto-generated from first/last name and student ID
+          (`first.last`, `firstlast`, `last`, `first`, `student_id`, `user`) with numeric suffix if needed.
+        </div>
+      </details>
 
       <div class="grid">
         <label>
-          Username
-          <input v-model.trim="form.username" type="text" placeholder="u10001" />
+          Username (optional)
+          <input v-model.trim="form.username" type="text" placeholder="u10001 or leave blank" />
           <span v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</span>
         </label>
         <label>
           Password
-          <input v-model="form.password" type="password" placeholder="Test@123456" />
+          <div class="password-row">
+            <input
+              v-model="form.password"
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Test@123456"
+              autocomplete="new-password"
+            />
+            <button class="btn" type="button" @click="showPassword = !showPassword">
+              {{ showPassword ? "Hide" : "Show" }}
+            </button>
+          </div>
           <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
+        </label>
+        <label>
+          First Name
+          <input v-model.trim="form.first_name" type="text" placeholder="Ivan" @blur="onNameFieldBlur" />
+          <span v-if="fieldErrors.first_name" class="field-error">{{ fieldErrors.first_name }}</span>
+        </label>
+        <label>
+          Last Name
+          <input v-model.trim="form.last_name" type="text" placeholder="Ivanov" @blur="onNameFieldBlur" />
+          <span v-if="fieldErrors.last_name" class="field-error">{{ fieldErrors.last_name }}</span>
         </label>
         <label>
           Student ID
@@ -30,19 +57,21 @@
           <span v-if="fieldErrors.student_id" class="field-error">{{ fieldErrors.student_id }}</span>
         </label>
         <label>
-          Russian Name
-          <input v-model.trim="form.russian_name" type="text" placeholder="Иван Иванов" />
-          <span v-if="fieldErrors.russian_name" class="field-error">{{ fieldErrors.russian_name }}</span>
-        </label>
-        <label>
-          Pinyin Name
-          <input v-model.trim="form.pinyin_name" type="text" placeholder="Zhang San" />
-          <span v-if="fieldErrors.pinyin_name" class="field-error">{{ fieldErrors.pinyin_name }}</span>
-        </label>
-        <label>
           Paid Flag (optional)
           <input v-model.trim="form.paid_flag" type="text" placeholder="$" maxlength="1" />
           <span v-if="fieldErrors.paid_flag" class="field-error">{{ fieldErrors.paid_flag }}</span>
+        </label>
+        <label class="full-row">
+          Display Name (optional)
+          <input
+            v-model.trim="form.display_name"
+            type="text"
+            placeholder="Auto: First Name + Last Name"
+            @input="onDisplayNameInput"
+            @blur="onDisplayNameBlur"
+          />
+          <span class="muted">If left blank, it auto-fills from First Name + Last Name on blur.</span>
+          <span v-if="fieldErrors.display_name" class="field-error">{{ fieldErrors.display_name }}</span>
         </label>
       </div>
 
@@ -169,6 +198,8 @@ const error = ref("");
 const fieldErrors = ref({});
 const submitMessage = ref("");
 const submitPhase = ref("idle");
+const showPassword = ref(false);
+const displayNameCustomized = ref(false);
 
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
@@ -192,8 +223,9 @@ const form = ref({
   username: "",
   password: "",
   student_id: "",
-  russian_name: "",
-  pinyin_name: "",
+  first_name: "",
+  last_name: "",
+  display_name: "",
   paid_flag: "",
 });
 
@@ -255,6 +287,35 @@ function removeGroup(cn) {
 
 function focusGroupInput() {
   groupInputRef.value?.focus();
+}
+
+function buildAutoDisplayName() {
+  return `${form.value.first_name || ""} ${form.value.last_name || ""}`.trim();
+}
+
+function onDisplayNameInput() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current) {
+    displayNameCustomized.value = false;
+    return;
+  }
+  displayNameCustomized.value = current !== buildAutoDisplayName();
+}
+
+function onNameFieldBlur() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current || !displayNameCustomized.value) {
+    form.value.display_name = buildAutoDisplayName();
+    displayNameCustomized.value = false;
+  }
+}
+
+function onDisplayNameBlur() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current) {
+    form.value.display_name = buildAutoDisplayName();
+    displayNameCustomized.value = false;
+  }
 }
 
 function pickOuPath(path) {
@@ -351,11 +412,12 @@ async function submit() {
 
   try {
     const payload = {
-      username: form.value.username,
+      username: form.value.username || null,
       password: form.value.password,
       student_id: form.value.student_id,
-      russian_name: form.value.russian_name,
-      pinyin_name: form.value.pinyin_name,
+      first_name: form.value.first_name,
+      last_name: form.value.last_name,
+      display_name: form.value.display_name || null,
       paid_flag: form.value.paid_flag || null,
       groups: selectedGroups.value,
       ou_path: parseOuPath(selectedOuPath.value),
@@ -439,10 +501,38 @@ onUnmounted(() => {
   gap: 12px;
   margin-bottom: 12px;
 }
+.username-help {
+  margin: -4px 0 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+.username-help summary {
+  cursor: pointer;
+  user-select: none;
+}
+.username-help[open] {
+  display: grid;
+  gap: 6px;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 12px;
+}
+.full-row {
+  grid-column: 1 / -1;
+}
+.password-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.password-row input {
+  flex: 1;
+}
+.password-row .btn {
+  min-width: 72px;
 }
 label {
   display: grid;

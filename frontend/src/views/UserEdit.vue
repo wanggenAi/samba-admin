@@ -13,12 +13,21 @@
         </button>
       </div>
 
+      <details class="username-help">
+        <summary>Username rule</summary>
+        <div class="muted">
+          Username is optional. If left blank, it is auto-generated from first/last name and student ID
+          (`first.last`, `firstlast`, `last`, `first`, `student_id`, `user`) with numeric suffix if needed.
+        </div>
+      </details>
+
       <p v-if="loadingInitial" class="muted">Loading user data...</p>
 
       <div class="grid">
         <label>
-          Username
-          <input v-model.trim="form.username" type="text" readonly />
+          Username (optional)
+          <input v-model.trim="form.username" type="text" placeholder="u10001 or leave blank" />
+          <span v-if="fieldErrors.username" class="field-error">{{ fieldErrors.username }}</span>
         </label>
         <label>
           Password
@@ -37,24 +46,36 @@
           <span v-if="fieldErrors.password" class="field-error">{{ fieldErrors.password }}</span>
         </label>
         <label>
+          First Name
+          <input v-model.trim="form.first_name" type="text" placeholder="Ivan" @blur="onNameFieldBlur" />
+          <span v-if="fieldErrors.first_name" class="field-error">{{ fieldErrors.first_name }}</span>
+        </label>
+        <label>
+          Last Name
+          <input v-model.trim="form.last_name" type="text" placeholder="Ivanov" @blur="onNameFieldBlur" />
+          <span v-if="fieldErrors.last_name" class="field-error">{{ fieldErrors.last_name }}</span>
+        </label>
+        <label>
           Student ID
-          <input v-model.trim="form.student_id" type="text" />
+          <input v-model.trim="form.student_id" type="text" placeholder="2026001" />
           <span v-if="fieldErrors.student_id" class="field-error">{{ fieldErrors.student_id }}</span>
-        </label>
-        <label>
-          Russian Name
-          <input v-model.trim="form.russian_name" type="text" />
-          <span v-if="fieldErrors.russian_name" class="field-error">{{ fieldErrors.russian_name }}</span>
-        </label>
-        <label>
-          Pinyin Name
-          <input v-model.trim="form.pinyin_name" type="text" />
-          <span v-if="fieldErrors.pinyin_name" class="field-error">{{ fieldErrors.pinyin_name }}</span>
         </label>
         <label>
           Paid Flag (optional)
           <input v-model.trim="form.paid_flag" type="text" placeholder="$" maxlength="1" />
           <span v-if="fieldErrors.paid_flag" class="field-error">{{ fieldErrors.paid_flag }}</span>
+        </label>
+        <label class="full-row">
+          Display Name (optional)
+          <input
+            v-model.trim="form.display_name"
+            type="text"
+            placeholder="Auto: First Name + Last Name"
+            @input="onDisplayNameInput"
+            @blur="onDisplayNameBlur"
+          />
+          <span class="muted">If left blank, it auto-fills from First Name + Last Name on blur.</span>
+          <span v-if="fieldErrors.display_name" class="field-error">{{ fieldErrors.display_name }}</span>
         </label>
       </div>
 
@@ -173,7 +194,7 @@ import { apiAddUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } fr
 
 const route = useRoute();
 const router = useRouter();
-const username = String(route.params.username || "").trim();
+const sourceUsername = String(route.params.username || "").trim();
 
 const users = ref([]);
 const groups = ref([]);
@@ -187,6 +208,7 @@ const fieldErrors = ref({});
 const submitMessage = ref("");
 const submitPhase = ref("idle");
 const showPassword = ref(false);
+const displayNameCustomized = ref(false);
 
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
@@ -207,11 +229,12 @@ const GROUP_CODE_MAP = {
 };
 
 const form = ref({
-  username,
+  username: "",
   password: "",
   student_id: "",
-  russian_name: "",
-  pinyin_name: "",
+  first_name: "",
+  last_name: "",
+  display_name: "",
   paid_flag: "",
 });
 
@@ -293,6 +316,39 @@ function focusGroupInput() {
   groupInputRef.value?.focus();
 }
 
+function buildDisplayName(firstName, lastName) {
+  return `${firstName || ""} ${lastName || ""}`.trim();
+}
+
+function buildAutoDisplayName() {
+  return buildDisplayName(form.value.first_name, form.value.last_name);
+}
+
+function onDisplayNameInput() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current) {
+    displayNameCustomized.value = false;
+    return;
+  }
+  displayNameCustomized.value = current !== buildAutoDisplayName();
+}
+
+function onNameFieldBlur() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current || !displayNameCustomized.value) {
+    form.value.display_name = buildAutoDisplayName();
+    displayNameCustomized.value = false;
+  }
+}
+
+function onDisplayNameBlur() {
+  const current = String(form.value.display_name || "").trim();
+  if (!current) {
+    form.value.display_name = buildAutoDisplayName();
+    displayNameCustomized.value = false;
+  }
+}
+
 function pickOuPath(path) {
   if (!path) return;
   selectedOuPath.value = path;
@@ -355,9 +411,19 @@ function onClickOutside(event) {
 }
 
 function prefillFromUser(user) {
+  form.value.username = user?.sAMAccountName || sourceUsername;
   form.value.student_id = user?.employeeID || "";
-  form.value.russian_name = user?.displayName || "";
-  form.value.pinyin_name = user?.givenName || "";
+
+  const firstName = user?.givenName || "";
+  const lastName = user?.sn || "";
+  form.value.first_name = firstName;
+  form.value.last_name = lastName;
+
+  const autoDisplay = buildDisplayName(firstName, lastName);
+  const currentDisplay = String(user?.displayName || "").trim();
+  form.value.display_name = currentDisplay || autoDisplay;
+  displayNameCustomized.value = Boolean(currentDisplay && currentDisplay !== autoDisplay);
+
   form.value.paid_flag = user?.employeeType || "";
   selectedOuPath.value = extractOuPathFromDn(user?.dn || "");
 
@@ -394,7 +460,7 @@ async function refreshOuTree() {
 }
 
 async function loadInitial() {
-  if (!username) {
+  if (!sourceUsername) {
     error.value = "missing username in route";
     return;
   }
@@ -403,9 +469,9 @@ async function loadInitial() {
   error.value = "";
   try {
     await Promise.all([refreshUsers(), refreshGroups(), refreshOuTree()]);
-    const user = users.value.find((u) => String(u?.sAMAccountName || "").toLowerCase() === username.toLowerCase());
+    const user = users.value.find((u) => String(u?.sAMAccountName || "").toLowerCase() === sourceUsername.toLowerCase());
     if (!user) {
-      error.value = `user not found: ${username}`;
+      error.value = `user not found: ${sourceUsername}`;
       return;
     }
     prefillFromUser(user);
@@ -425,11 +491,13 @@ async function submit() {
 
   try {
     const payload = {
-      username: form.value.username,
+      source_username: sourceUsername,
+      username: form.value.username || null,
       password: form.value.password,
       student_id: form.value.student_id,
-      russian_name: form.value.russian_name,
-      pinyin_name: form.value.pinyin_name,
+      first_name: form.value.first_name,
+      last_name: form.value.last_name,
+      display_name: form.value.display_name || null,
       paid_flag: form.value.paid_flag || null,
       groups: selectedGroups.value,
       ou_path: parseOuPath(selectedOuPath.value),
@@ -506,10 +574,27 @@ onUnmounted(() => {
   gap: 12px;
   margin-bottom: 12px;
 }
+.username-help {
+  margin: -4px 0 10px;
+  color: #64748b;
+  font-size: 13px;
+}
+.username-help summary {
+  cursor: pointer;
+  user-select: none;
+}
+.username-help[open] {
+  display: grid;
+  gap: 6px;
+}
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(220px, 1fr));
-  gap: 10px;
+  column-gap: 10px;
+  row-gap: 12px;
+}
+.full-row {
+  grid-column: 1 / -1;
 }
 .password-row {
   display: flex;
@@ -518,6 +603,9 @@ onUnmounted(() => {
 }
 .password-row input {
   flex: 1;
+}
+.password-row .btn {
+  min-width: 72px;
 }
 label {
   display: grid;
@@ -528,10 +616,6 @@ input {
   border: 1px solid #ddd;
   border-radius: 8px;
   padding: 8px 10px;
-}
-input[readonly] {
-  background: #f8fafc;
-  color: #475569;
 }
 .btn {
   padding: 8px 12px;
@@ -631,33 +715,43 @@ input[readonly] {
   border-radius: 8px;
 }
 .muted {
-  color: #64748b;
+  color: #777;
 }
 .submit-mask {
   position: fixed;
   inset: 0;
+  z-index: 1000;
   background: rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(1px);
   display: grid;
   place-items: center;
-  z-index: 1000;
 }
 .submit-mask-card {
-  width: min(420px, calc(100vw - 40px));
-  border-radius: 14px;
-  border: 1px solid #dbeafe;
-  background: #fff;
-  box-shadow: 0 16px 50px rgba(15, 23, 42, 0.2);
-  padding: 18px 20px;
+  width: min(92vw, 460px);
+  padding: 16px 18px;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16);
 }
 .submit-mask-card h4 {
-  margin: 0;
+  margin: 0 0 6px;
   font-size: 18px;
 }
 .submit-mask-card p {
-  margin: 8px 0 0;
-  color: #334155;
+  margin: 0;
+  color: #475569;
 }
 .submit-mask-card.success {
   border-color: #86efac;
+  background: #f0fdf4;
+}
+@media (max-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .combo-input {
+    min-width: 160px;
+  }
 }
 </style>

@@ -55,6 +55,7 @@ class LdapUser(BaseModel):
     displayName: Optional[str] = None
     userPrincipalName: Optional[str] = None
     givenName: Optional[str] = None
+    sn: Optional[str] = None
     employeeID: Optional[str] = None
     employeeType: Optional[str] = None
 

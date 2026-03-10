@@ -142,7 +142,7 @@
               v-model.trim="userKeyword"
               type="text"
               class="search-input"
-              placeholder="Search username / display name / UPN / DN / OU path"
+              placeholder="Search username / first name / last name / display name / UPN / DN / OU path"
             />
             <button class="btn" :disabled="loadingUsers" @click="onRefreshUsers">
               {{ loadingUsers ? "Loading..." : "Refresh" }}
@@ -163,7 +163,8 @@
                 </th>
                 <th class="username-col">Username</th>
                 <th>Display Name</th>
-                <th>Pinyin</th>
+                <th>First Name</th>
+                <th>Last Name</th>
                 <th>Student ID</th>
                 <th>Paid</th>
                 <th>UPN</th>
@@ -186,6 +187,7 @@
                 <td class="mono username-col" :title="u.sAMAccountName || '-'">{{ u.sAMAccountName || "-" }}</td>
                 <td>{{ u.displayName || "-" }}</td>
                 <td>{{ u.givenName || "-" }}</td>
+                <td>{{ u.sn || "-" }}</td>
                 <td class="mono">{{ u.employeeID || "-" }}</td>
                 <td class="mono">{{ u.employeeType || "-" }}</td>
                 <td class="mono">{{ u.userPrincipalName || "-" }}</td>
@@ -213,7 +215,7 @@
                 </td>
               </tr>
               <tr v-if="!filteredUsers.length" class="empty-row">
-                <td colspan="10" class="muted">No users found.</td>
+                <td colspan="11" class="muted">No users found.</td>
               </tr>
             </tbody>
           </table>
@@ -374,7 +376,7 @@ const filteredUsers = computed(() => {
   return items.filter((u) => {
     const ouPath = extractOuPathFromDn(u.dn || "");
     const groupsText = groupsByUser(u).join(" ");
-    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath, groupsText];
+    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.sn, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath, groupsText];
     return fields.some((value) => (value || "").toLowerCase().includes(kw));
   });
 });

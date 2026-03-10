@@ -301,20 +301,30 @@ class LdapService:
         username: str,
         password: str,
         parent_dn: Optional[str] = None,
+        first_name: Optional[str] = None,
+        last_name: Optional[str] = None,
+        display_name: Optional[str] = None,
     ) -> str:
         target_parent_dn = parent_dn or self._users_container_dn()
         user_dn = f"CN={ldap3.utils.dn.escape_rdn(username)},{target_parent_dn}"
         user_principal_name = f"{username}@{self._domain_from_base_dn()}"
+        safe_first = (first_name or "").strip()
+        safe_last = (last_name or "").strip()
+        resolved_display_name = (display_name or "").strip() or f"{safe_first} {safe_last}".strip()
 
         attributes = {
             "objectClass": ["top", "person", "organizationalPerson", "user"],
             "cn": username,
-            "sn": username,
+            "sn": safe_last or username,
             "sAMAccountName": username,
             "userPrincipalName": user_principal_name,
             # 514: normal account + disabled
             "userAccountControl": "514",
         }
+        if safe_first:
+            attributes["givenName"] = safe_first
+        if resolved_display_name:
+            attributes["displayName"] = resolved_display_name
 
         if not conn.add(user_dn, attributes=attributes):
             raise LDAPException(f"create user failed: {conn.result}")
@@ -367,20 +377,23 @@ class LdapService:
         conn: ldap3.Connection,
         user_dn: str,
         student_id: str,
-        russian_name: str,
-        pinyin_name: str,
+        first_name: str,
+        last_name: str,
+        display_name: Optional[str],
         paid_flag: Optional[str],
     ) -> List[str]:
+        resolved_display_name = (display_name or "").strip() or f"{first_name} {last_name}".strip()
         base_changes: Dict[str, List[tuple[int, List[str]]]] = {
-            "displayName": [(ldap3.MODIFY_REPLACE, [russian_name])],
-            "givenName": [(ldap3.MODIFY_REPLACE, [pinyin_name])],
+            "displayName": [(ldap3.MODIFY_REPLACE, [resolved_display_name])],
+            "givenName": [(ldap3.MODIFY_REPLACE, [first_name])],
+            "sn": [(ldap3.MODIFY_REPLACE, [last_name])],
             "employeeID": [(ldap3.MODIFY_REPLACE, [student_id])],
         }
 
         if not conn.modify(user_dn, base_changes):
             raise LDAPException(f"update user attributes failed: {conn.result}")
 
-        updated: List[str] = ["displayName", "givenName", "employeeID"]
+        updated: List[str] = ["displayName", "givenName", "sn", "employeeID"]
 
         if paid_flag == "$":
             if not conn.modify(user_dn, {"employeeType": [(ldap3.MODIFY_REPLACE, ["$"])]}):
@@ -395,6 +408,16 @@ class LdapService:
             updated.append("employeeType")
 
         return updated
+
+    def update_user_login_identifiers(self, conn: ldap3.Connection, user_dn: str, username: str) -> List[str]:
+        user_principal_name = f"{username}@{self._domain_from_base_dn()}"
+        changes: Dict[str, List[tuple[int, List[str]]]] = {
+            "sAMAccountName": [(ldap3.MODIFY_REPLACE, [username])],
+            "userPrincipalName": [(ldap3.MODIFY_REPLACE, [user_principal_name])],
+        }
+        if not conn.modify(user_dn, changes):
+            raise LDAPException(f"update user login attributes failed: {conn.result}")
+        return ["sAMAccountName", "userPrincipalName"]
 
     def add_user_to_group(self, conn: ldap3.Connection, user_dn: str, group_dn: str) -> None:
         ok = conn.modify(group_dn, {"member": [(ldap3.MODIFY_ADD, [user_dn])]})
@@ -455,6 +478,7 @@ class LdapService:
                     "displayName",
                     "userPrincipalName",
                     "givenName",
+                    "sn",
                     "employeeID",
                     "employeeType",
                 ],
@@ -468,6 +492,7 @@ class LdapService:
                         displayName=self._entry_attr(e, "displayName"),
                         userPrincipalName=self._entry_attr(e, "userPrincipalName"),
                         givenName=self._entry_attr(e, "givenName"),
+                        sn=self._entry_attr(e, "sn"),
                         employeeID=self._entry_attr(e, "employeeID"),
                         employeeType=self._entry_attr(e, "employeeType"),
                     )
@@ -486,7 +511,7 @@ class LdapService:
             conn.search(
                 search_base=self.cfg.base_dn,
                 search_filter="(&(objectClass=user)(!(objectClass=computer)))",
-                attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName"],
+                attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName", "givenName", "sn"],
             )
             user_entries = list(conn.entries)
 
@@ -527,6 +552,8 @@ class LdapService:
                     sAMAccountName=str(getattr(entry, "sAMAccountName", "")) if hasattr(entry, "sAMAccountName") else None,
                     displayName=str(getattr(entry, "displayName", "")) if hasattr(entry, "displayName") else None,
                     userPrincipalName=str(getattr(entry, "userPrincipalName", "")) if hasattr(entry, "userPrincipalName") else None,
+                    givenName=str(getattr(entry, "givenName", "")) if hasattr(entry, "givenName") else None,
+                    sn=str(getattr(entry, "sn", "")) if hasattr(entry, "sn") else None,
                 )
             )
 
@@ -577,7 +604,7 @@ class LdapService:
                 conn.search(
                     search_base=self.cfg.base_dn,
                     search_filter=flt,
-                    attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName"],
+                    attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName", "givenName", "sn"],
                 )
                 for e in conn.entries:
                     dn = str(getattr(e, "distinguishedName", ""))
@@ -588,6 +615,8 @@ class LdapService:
                         sAMAccountName=str(getattr(e, "sAMAccountName", "")) if hasattr(e, "sAMAccountName") else None,
                         displayName=str(getattr(e, "displayName", "")) if hasattr(e, "displayName") else None,
                         userPrincipalName=str(getattr(e, "userPrincipalName", "")) if hasattr(e, "userPrincipalName") else None,
+                        givenName=str(getattr(e, "givenName", "")) if hasattr(e, "givenName") else None,
+                        sn=str(getattr(e, "sn", "")) if hasattr(e, "sn") else None,
                     )
             return out
 

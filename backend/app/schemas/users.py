@@ -6,11 +6,13 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class UserAddRequest(BaseModel):
-    username: str = Field(min_length=1, max_length=64)
+    source_username: Optional[str] = Field(default=None, max_length=64)
+    username: Optional[str] = Field(default=None, max_length=64)
     password: Optional[str] = Field(default=None, max_length=256)
     student_id: str = Field(min_length=1, max_length=64)
-    russian_name: str = Field(min_length=1, max_length=128)
-    pinyin_name: str = Field(min_length=1, max_length=128)
+    first_name: str = Field(min_length=1, max_length=128)
+    last_name: str = Field(min_length=1, max_length=128)
+    display_name: Optional[str] = Field(default=None, max_length=128)
     paid_flag: Optional[str] = None
     groups: list[str] = Field(default_factory=list)
     ou_path: list[str] = Field(default_factory=list)
@@ -22,15 +24,12 @@ class UserAddRequest(BaseModel):
         v = value.strip()
         return v or None
 
-    @field_validator("username")
+    @field_validator("source_username", "username")
     @classmethod
-    def _normalize_username(cls, value: str) -> str:
-        v = value.strip()
-        if not v:
-            raise ValueError("username cannot be empty")
-        return v
+    def _normalize_username(cls, value: Optional[str]) -> Optional[str]:
+        return cls._strip_or_none(value)
 
-    @field_validator("student_id", "russian_name", "pinyin_name")
+    @field_validator("student_id", "first_name", "last_name")
     @classmethod
     def _strip_required_text(cls, value: str) -> str:
         v = value.strip()
@@ -47,6 +46,11 @@ class UserAddRequest(BaseModel):
         if v != "$":
             raise ValueError("paid_flag must be '$' or empty")
         return v
+
+    @field_validator("display_name")
+    @classmethod
+    def _normalize_display_name(cls, value: Optional[str]) -> Optional[str]:
+        return cls._strip_or_none(value)
 
     @field_validator("password")
     @classmethod
