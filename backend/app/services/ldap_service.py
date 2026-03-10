@@ -481,6 +481,10 @@ class LdapService:
                     "sn",
                     "employeeID",
                     "employeeType",
+                    "whenCreated",
+                    "whenChanged",
+                    "lastLogon",
+                    "lastLogoff",
                 ],
             )
             users: List[LdapUser] = []
@@ -495,6 +499,10 @@ class LdapService:
                         sn=self._entry_attr(e, "sn"),
                         employeeID=self._entry_attr(e, "employeeID"),
                         employeeType=self._entry_attr(e, "employeeType"),
+                        whenCreated=self._entry_attr(e, "whenCreated"),
+                        whenChanged=self._entry_attr(e, "whenChanged"),
+                        lastLogon=self._entry_attr(e, "lastLogon"),
+                        lastLogoff=self._entry_attr(e, "lastLogoff"),
                     )
                 )
             return users
@@ -511,7 +519,18 @@ class LdapService:
             conn.search(
                 search_base=self.cfg.base_dn,
                 search_filter="(&(objectClass=user)(!(objectClass=computer)))",
-                attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName", "givenName", "sn"],
+                attributes=[
+                    "distinguishedName",
+                    "sAMAccountName",
+                    "displayName",
+                    "userPrincipalName",
+                    "givenName",
+                    "sn",
+                    "whenCreated",
+                    "whenChanged",
+                    "lastLogon",
+                    "lastLogoff",
+                ],
             )
             user_entries = list(conn.entries)
 
@@ -554,6 +573,10 @@ class LdapService:
                     userPrincipalName=str(getattr(entry, "userPrincipalName", "")) if hasattr(entry, "userPrincipalName") else None,
                     givenName=str(getattr(entry, "givenName", "")) if hasattr(entry, "givenName") else None,
                     sn=str(getattr(entry, "sn", "")) if hasattr(entry, "sn") else None,
+                    whenCreated=str(getattr(entry, "whenCreated", "")) if hasattr(entry, "whenCreated") else None,
+                    whenChanged=str(getattr(entry, "whenChanged", "")) if hasattr(entry, "whenChanged") else None,
+                    lastLogon=str(getattr(entry, "lastLogon", "")) if hasattr(entry, "lastLogon") else None,
+                    lastLogoff=str(getattr(entry, "lastLogoff", "")) if hasattr(entry, "lastLogoff") else None,
                 )
             )
 
@@ -604,7 +627,18 @@ class LdapService:
                 conn.search(
                     search_base=self.cfg.base_dn,
                     search_filter=flt,
-                    attributes=["distinguishedName", "sAMAccountName", "displayName", "userPrincipalName", "givenName", "sn"],
+                    attributes=[
+                        "distinguishedName",
+                        "sAMAccountName",
+                        "displayName",
+                        "userPrincipalName",
+                        "givenName",
+                        "sn",
+                        "whenCreated",
+                        "whenChanged",
+                        "lastLogon",
+                        "lastLogoff",
+                    ],
                 )
                 for e in conn.entries:
                     dn = str(getattr(e, "distinguishedName", ""))
@@ -617,6 +651,10 @@ class LdapService:
                         userPrincipalName=str(getattr(e, "userPrincipalName", "")) if hasattr(e, "userPrincipalName") else None,
                         givenName=str(getattr(e, "givenName", "")) if hasattr(e, "givenName") else None,
                         sn=str(getattr(e, "sn", "")) if hasattr(e, "sn") else None,
+                        whenCreated=str(getattr(e, "whenCreated", "")) if hasattr(e, "whenCreated") else None,
+                        whenChanged=str(getattr(e, "whenChanged", "")) if hasattr(e, "whenChanged") else None,
+                        lastLogon=str(getattr(e, "lastLogon", "")) if hasattr(e, "lastLogon") else None,
+                        lastLogoff=str(getattr(e, "lastLogoff", "")) if hasattr(e, "lastLogoff") else None,
                     )
             return out
 

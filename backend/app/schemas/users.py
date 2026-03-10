@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -100,3 +100,26 @@ class UserDeleteResponse(BaseModel):
     username: str
     deleted: bool
     dn: Optional[str] = None
+
+
+class UserImportItemResult(BaseModel):
+    file_name: str
+    line_no: int
+    raw_line: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    ou_path: list[str] = Field(default_factory=list)
+    status: Literal["created", "skipped", "failed"]
+    message: str
+
+
+class UserImportResponse(BaseModel):
+    ok: bool = True
+    total_files: int
+    total_lines: int
+    created: int
+    skipped: int
+    failed: int
+    results: list[UserImportItemResult] = Field(default_factory=list)

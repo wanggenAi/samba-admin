@@ -5,11 +5,70 @@
         <h2>Users</h2>
         <p class="sub">Browse OU structure, filter users, and bulk-delete selected accounts.</p>
       </div>
-      <button class="btn primary" type="button" @click="openAddWindow">New User</button>
+      <div class="page-head-actions">
+        <input
+          ref="importInputRef"
+          class="file-input-hidden"
+          type="file"
+          accept=".txt,text/plain"
+          multiple
+          @change="onImportFiles"
+        />
+        <button class="btn" type="button" :disabled="importing" @click="triggerImport">
+          {{ importing ? "Importing..." : "Import TXT" }}
+        </button>
+        <button class="btn" type="button" :disabled="exporting" @click="onExportUsers">
+          {{ exporting ? "Exporting..." : "Export CSV" }}
+        </button>
+        <button class="btn primary" type="button" @click="openAddWindow">New User</button>
+      </div>
     </header>
 
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="actionMessage" class="ok">{{ actionMessage }}</p>
+    <section v-if="importReport" class="panel import-report">
+      <div class="import-report-head">
+        <h3>Import Report</h3>
+        <button class="btn" type="button" @click="importReport = null">Close</button>
+      </div>
+      <p class="muted">
+        Files: {{ importReport.total_files }} |
+        Rows: {{ importReport.total_lines }} |
+        Created: {{ importReport.created }} |
+        Skipped: {{ importReport.skipped }} |
+        Failed: {{ importReport.failed }}
+      </p>
+      <div class="import-table-wrap">
+        <table class="import-table">
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Line</th>
+              <th>Status</th>
+              <th>Username</th>
+              <th>Password</th>
+              <th>Name</th>
+              <th>OU Path</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(item, idx) in importReport.results" :key="`${item.file_name}:${item.line_no}:${idx}`">
+              <td>{{ item.file_name }}</td>
+              <td class="mono">{{ item.line_no || "-" }}</td>
+              <td>
+                <span class="import-status" :class="item.status">{{ item.status }}</span>
+              </td>
+              <td class="mono">{{ item.username || "-" }}</td>
+              <td class="mono">{{ item.password || "-" }}</td>
+              <td>{{ [item.first_name, item.last_name].filter(Boolean).join(" ") || "-" }}</td>
+              <td>{{ item.ou_path?.length ? item.ou_path.join(" > ") : "-" }}</td>
+              <td>{{ item.message }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     <div class="workspace">
       <section class="panel tree-panel">
@@ -168,6 +227,7 @@
                 <th>Student ID</th>
                 <th>Paid</th>
                 <th>UPN</th>
+                <th>Updated At</th>
                 <th>Groups</th>
                 <th>DN</th>
                 <th>Actions</th>
@@ -191,6 +251,7 @@
                 <td class="mono">{{ u.employeeID || "-" }}</td>
                 <td class="mono">{{ u.employeeType || "-" }}</td>
                 <td class="mono">{{ u.userPrincipalName || "-" }}</td>
+                <td class="mono">{{ formatLdapTime(userUpdatedAt(u)) }}</td>
                 <td>
                   <div class="group-cell">
                     <span
@@ -215,7 +276,7 @@
                 </td>
               </tr>
               <tr v-if="!filteredUsers.length" class="empty-row">
-                <td colspan="11" class="muted">No users found.</td>
+                <td colspan="12" class="muted">No users found.</td>
               </tr>
             </tbody>
           </table>
@@ -251,17 +312,27 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { apiDeleteUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
+import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import {
+  apiDeleteUser,
+  apiExportUsers,
+  apiImportUsers,
+  apiListLdapGroups,
+  apiListLdapOuTree,
+  apiListLdapUsers,
+} from "../api/client";
 
-const users = ref([]);
-const groups = ref([]);
-const ouTree = ref([]);
+const users = shallowRef([]);
+const groups = shallowRef([]);
+const ouTree = shallowRef([]);
 const loadingUsers = ref(false);
 const loadingGroups = ref(false);
 const loadingOuTree = ref(false);
+const importing = ref(false);
+const exporting = ref(false);
 const error = ref("");
 const actionMessage = ref("");
+const importReport = shallowRef(null);
 const userKeyword = ref("");
 const ouKeyword = ref("");
 const groupKeyword = ref("");
@@ -275,6 +346,8 @@ const deletingBatch = ref(false);
 const selectedUsernames = ref([]);
 const expandedOuDns = ref(new Set());
 const protectedUsernames = new Set(["krbtgt"]);
+const importInputRef = ref(null);
+const EMPTY_STR_LIST = Object.freeze([]);
 
 const ouTreeLines = computed(() => {
   const kw = ouKeyword.value.trim().toLowerCase();
@@ -330,7 +403,7 @@ const ouTreeLines = computed(() => {
   return collect(ouTree.value, 0, []).lines;
 });
 
-const userGroupMap = computed(() => {
+const userGroupListMap = computed(() => {
   const out = new Map();
   for (const g of groups.value) {
     const cn = String(g?.cn || "").trim();
@@ -338,9 +411,13 @@ const userGroupMap = computed(() => {
     for (const memberDn of g?.members || []) {
       const key = normalizeDn(memberDn);
       if (!key) continue;
-      if (!out.has(key)) out.set(key, new Set());
-      out.get(key).add(cn);
+      if (!out.has(key)) out.set(key, []);
+      const values = out.get(key);
+      if (!values.includes(cn)) values.push(cn);
     }
+  }
+  for (const values of out.values()) {
+    values.sort((a, b) => a.localeCompare(b));
   }
   return out;
 });
@@ -364,21 +441,43 @@ const filteredUsers = computed(() => {
   if (selectedGroups.value.length) {
     const targets = new Set(selectedGroups.value.map((g) => g.toLowerCase()));
     items = items.filter((u) => {
-      const values = groupsByUser(u).map((g) => g.toLowerCase());
+      const values = groupsByUser(u);
       if (!values.length) return false;
-      return values.some((g) => targets.has(g));
+      return values.some((g) => targets.has(g.toLowerCase()));
     });
   }
 
   const kw = userKeyword.value.trim().toLowerCase();
-  if (!kw) return items;
+  if (kw) {
+    items = items.filter((u) => {
+      const ouPath = extractOuPathFromDn(u.dn || "");
+      const groupsText = groupsByUser(u).join(" ");
+      const fields = [
+        u.sAMAccountName,
+        u.displayName,
+        u.givenName,
+        u.sn,
+        u.employeeID,
+        u.employeeType,
+        u.userPrincipalName,
+        u.whenCreated,
+        u.whenChanged,
+        u.dn,
+        ouPath,
+        groupsText,
+      ];
+      return fields.some((value) => (value || "").toLowerCase().includes(kw));
+    });
+  }
 
-  return items.filter((u) => {
-    const ouPath = extractOuPathFromDn(u.dn || "");
-    const groupsText = groupsByUser(u).join(" ");
-    const fields = [u.sAMAccountName, u.displayName, u.givenName, u.sn, u.employeeID, u.employeeType, u.userPrincipalName, u.dn, ouPath, groupsText];
-    return fields.some((value) => (value || "").toLowerCase().includes(kw));
+  const sorted = [...items].sort((a, b) => {
+    const diff = parseLdapTime(userUpdatedAt(b)) - parseLdapTime(userUpdatedAt(a));
+    if (diff !== 0) return diff;
+    const ua = String(a?.sAMAccountName || "").toLowerCase();
+    const ub = String(b?.sAMAccountName || "").toLowerCase();
+    return ua.localeCompare(ub);
   });
+  return sorted;
 });
 
 const totalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / pageSize.value)));
@@ -449,6 +548,31 @@ function resolveUsername(user) {
   return user?.sAMAccountName || extractCnFromDn(user?.dn || "");
 }
 
+function userUpdatedAt(user) {
+  return user?.whenChanged || user?.whenCreated || "";
+}
+
+function parseLdapTime(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return 0;
+
+  // AD generalizedTime: YYYYMMDDHHMMSS(.0)Z
+  const m = raw.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\.\d+)?Z$/i);
+  if (m) {
+    const [, y, mo, d, h, mi, s] = m;
+    return Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s));
+  }
+
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function formatLdapTime(value) {
+  const ts = parseLdapTime(value);
+  if (!ts) return "-";
+  return new Date(ts).toLocaleString();
+}
+
 function isProtectedUsername(username) {
   if (!username) return false;
   return protectedUsernames.has(String(username).toLowerCase());
@@ -456,10 +580,8 @@ function isProtectedUsername(username) {
 
 function groupsByUser(user) {
   const key = normalizeDn(user?.dn || "");
-  if (!key) return [];
-  const set = userGroupMap.value.get(key);
-  if (!set) return [];
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  if (!key) return EMPTY_STR_LIST;
+  return userGroupListMap.value.get(key) || EMPTY_STR_LIST;
 }
 
 function toggleGroup(cn, checked) {
@@ -476,6 +598,66 @@ function clearGroupFilters() {
   selectedGroups.value = [];
   groupKeyword.value = "";
   groupDropdownOpen.value = false;
+}
+
+function triggerImport() {
+  importInputRef.value?.click();
+}
+
+function _downloadBlob(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "users-export.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+async function onExportUsers() {
+  exporting.value = true;
+  error.value = "";
+  actionMessage.value = "";
+  try {
+    const { filename, blob } = await apiExportUsers();
+    _downloadBlob(blob, filename);
+    actionMessage.value = `Export completed: ${filename}`;
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    exporting.value = false;
+  }
+}
+
+async function onImportFiles(event) {
+  const input = event?.target;
+  const files = Array.from(input?.files || []);
+  if (!files.length) return;
+
+  const confirmText = `Import ${files.length} file(s)? Existing same-name users will be skipped.`;
+  if (!window.confirm(confirmText)) {
+    if (input) input.value = "";
+    return;
+  }
+
+  importing.value = true;
+  error.value = "";
+  actionMessage.value = "";
+  try {
+    const report = await apiImportUsers(files, {
+      defaultGroupCn: "Students",
+      passwordLength: 12,
+    });
+    importReport.value = report;
+    actionMessage.value = `Import finished: created ${report.created}, skipped ${report.skipped}, failed ${report.failed}.`;
+    await refreshAll();
+  } catch (e) {
+    error.value = e?.message || String(e);
+  } finally {
+    importing.value = false;
+    if (input) input.value = "";
+  }
 }
 
 function openAddWindow() {
@@ -701,6 +883,15 @@ watch(totalPages, (next) => {
   gap: 16px;
   padding: 4px 2px;
 }
+.page-head-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.file-input-hidden {
+  display: none;
+}
 .page-head h2 {
   margin: 0;
   line-height: 1.1;
@@ -723,6 +914,75 @@ watch(totalPages, (next) => {
   background: #ffffff;
   min-width: 0;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+.import-report {
+  display: grid;
+  gap: 8px;
+}
+.import-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.import-report-head h3 {
+  margin: 0;
+}
+.import-table-wrap {
+  overflow: auto;
+  border: 1px solid #e6edf4;
+  border-radius: 10px;
+}
+.import-table {
+  width: 100%;
+  min-width: 1000px;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+.import-table th,
+.import-table td {
+  border-bottom: 1px solid #edf2f7;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 13px;
+}
+.import-table th {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  background: #f8fbff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.import-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 66px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+  text-transform: lowercase;
+}
+.import-status.created {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #14532d;
+}
+.import-status.skipped {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+.import-status.failed {
+  background: #fee2e2;
+  border-color: #fecaca;
+  color: #991b1b;
 }
 .tree-panel,
 .list-panel {

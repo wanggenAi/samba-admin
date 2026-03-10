@@ -58,6 +58,10 @@ class LdapUser(BaseModel):
     sn: Optional[str] = None
     employeeID: Optional[str] = None
     employeeType: Optional[str] = None
+    whenCreated: Optional[str] = None
+    whenChanged: Optional[str] = None
+    lastLogon: Optional[str] = None
+    lastLogoff: Optional[str] = None
 
 
 class LdapGroup(BaseModel):

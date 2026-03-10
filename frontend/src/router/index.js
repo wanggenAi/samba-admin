@@ -1,11 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router";
-import Dashboard from "../views/Dashboard.vue";
-import Config from "../views/Config.vue";
-import Versions from "../views/Versions.vue";
-import Users from "../views/Users.vue";
-import UserCreate from "../views/UserCreate.vue";
-import UserEdit from "../views/UserEdit.vue";
-import OuManager from "../views/OuManager.vue";
+
+const Dashboard = () => import("../views/Dashboard.vue");
+const Config = () => import("../views/Config.vue");
+const Versions = () => import("../views/Versions.vue");
+const Users = () => import("../views/Users.vue");
+const UserCreate = () => import("../views/UserCreate.vue");
+const UserEdit = () => import("../views/UserEdit.vue");
+const OuManager = () => import("../views/OuManager.vue");
 
 const routes = [
     { path: "/", redirect: "/dashboard" },
