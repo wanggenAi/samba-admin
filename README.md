@@ -160,6 +160,162 @@ npm run build
 npm run preview
 ```
 
+## Server deployment with systemd
+
+This example assumes:
+- project path: `/opt/samba-admin`
+- runtime user/group: `sambaadmin`
+- backend listen: `127.0.0.1:8000`
+- frontend listen: `0.0.0.0:4173` (Vite preview, `/api` proxied to backend)
+
+### 1) Prepare runtime and dependencies
+
+```bash
+# one-time runtime user
+sudo useradd --system --create-home --shell /bin/bash sambaadmin
+
+# put project in /opt and set ownership
+sudo mkdir -p /opt
+sudo cp -R /path/to/your/samba-admin /opt/samba-admin
+sudo chown -R sambaadmin:sambaadmin /opt/samba-admin
+
+# backend deps
+cd /opt/samba-admin/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# frontend deps + build
+cd /opt/samba-admin/frontend
+npm ci
+npm run build
+```
+
+### 2) Backend environment file
+
+```bash
+sudo mkdir -p /etc/samba-admin
+sudo tee /etc/samba-admin/backend.env >/dev/null <<'EOF'
+SAMBA_SERVICE=samba-ad-dc
+SAMBA_CONF=/etc/samba/smb.conf
+SAMBA_TESTPARM=testparm
+ALLOW_APPLY=false
+
+LDAP_HOST=127.0.0.1
+LDAP_PORT=389
+LDAP_USE_SSL=false
+LDAP_START_TLS=false
+LDAP_TLS_SKIP_VERIFY=true
+LDAP_BIND_USER=Administrator@EXAMPLE.COM
+LDAP_BIND_PASSWORD=change_me
+LDAP_BASE_DN=DC=example,DC=com
+EOF
+sudo chmod 600 /etc/samba-admin/backend.env
+```
+
+### 3) Backend systemd service
+
+Create `/etc/systemd/system/samba-admin-backend.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+PartOf=samba-admin.service
+
+[Service]
+Type=simple
+User=sambaadmin
+Group=sambaadmin
+WorkingDirectory=/opt/samba-admin/backend
+EnvironmentFile=/etc/samba-admin/backend.env
+ExecStart=/opt/samba-admin/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 4) Frontend systemd service
+
+Create `/etc/systemd/system/samba-admin-frontend.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Frontend (Vite Preview)
+After=network-online.target
+Wants=network-online.target
+PartOf=samba-admin.service
+
+[Service]
+Type=simple
+User=sambaadmin
+Group=sambaadmin
+WorkingDirectory=/opt/samba-admin/frontend
+Environment=VITE_API_TARGET=http://127.0.0.1:8000
+ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 4173
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 5) General service (manage backend + frontend together)
+
+Create `/etc/systemd/system/samba-admin.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Stack (Backend + Frontend)
+Requires=samba-admin-backend.service samba-admin-frontend.service
+After=network-online.target samba-admin-backend.service samba-admin-frontend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+ExecStop=/usr/bin/true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 6) Enable and manage
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now samba-admin.service
+
+# check all
+sudo systemctl status samba-admin.service samba-admin-backend.service samba-admin-frontend.service
+
+# restart/stop/start all through general service
+sudo systemctl restart samba-admin.service
+sudo systemctl stop samba-admin.service
+sudo systemctl start samba-admin.service
+```
+
+Logs:
+
+```bash
+sudo journalctl -u samba-admin-backend.service -f
+sudo journalctl -u samba-admin-frontend.service -f
+```
+
+After frontend code changes:
+
+```bash
+cd /opt/samba-admin/frontend
+npm run build
+sudo systemctl restart samba-admin-frontend.service
+```
+
 ## API quick reference
 
 ### Health and LDAP
