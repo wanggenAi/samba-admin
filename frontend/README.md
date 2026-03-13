@@ -1,5 +1,47 @@
-# Vue 3 + Vite
+# Samba Admin Frontend
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + Vite frontend for the Samba Admin Console (LDAP-first mode).
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Requirements
+
+- Node.js `20.19+` (or `22.12+`)
+- npm `10+` recommended
+
+## Setup
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.development
+```
+
+`VITE_API_TARGET` controls where `/api/*` calls are proxied in local development.
+
+## Development
+
+```bash
+npm run dev
+```
+
+Default URL: `http://127.0.0.1:5173`  
+Default API target: `http://127.0.0.1:8000` (from `vite.config.js` fallback)
+
+## Build and Preview
+
+```bash
+npm run build
+npm run preview
+```
+
+Note:
+- Vite dev proxy is configured under `server.proxy` in `vite.config.js`.
+- `vite preview` serves static build output. For `/api` in deployment, use a reverse proxy (Nginx/Caddy) or same-origin backend routing.
+
+## Main Routes
+
+- `/dashboard`: LDAP health and environment status
+- `/users`: user list, group filter, TXT import, CSV export
+- `/users/new`: create user
+- `/users/edit/:username`: edit user
+- `/ous`: OU tree operations
+- `/config`, `/versions`: placeholder pages in current LDAP-only mode

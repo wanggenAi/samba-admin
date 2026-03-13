@@ -29,7 +29,7 @@ Browser (Vue 3 + Vite)
 
 - Backend: FastAPI, ldap3, Pydantic v2
 - Frontend: Vue 3, Vue Router, Vite
-- Runtime: Python 3.10+, Node.js 18+
+- Runtime: Python 3.10+, Node.js 20.19+ (or 22.12+)
 
 ## Features implemented
 
@@ -86,31 +86,12 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
-Create `backend/.env` (example):
+Edit `backend/.env` (example):
 
-```env
-# Samba (kept for compatibility; Samba APIs are disabled in current mode)
-SAMBA_SERVICE=samba-ad-dc
-SAMBA_CONF=/etc/samba/smb.conf
-SAMBA_TESTPARM=testparm
-ALLOW_APPLY=false
-
-# LDAP connection
-LDAP_HOST=127.0.0.1
-LDAP_PORT=389
-LDAP_USE_SSL=false
-LDAP_START_TLS=false
-LDAP_TLS_SKIP_VERIFY=true
-LDAP_BIND_USER=Administrator@EXAMPLE.COM
-LDAP_BIND_PASSWORD=change_me
-LDAP_BASE_DN=DC=example,DC=com
-
-# Optional
-# LDAP_USER_CONTAINER_DN=CN=Users,DC=example,DC=com
-# LDAP_USER_UPN_SUFFIX=example.com
-```
+See template: `backend/.env.example`
 
 Important:
 - `LDAP_BIND_PASSWORD` must be set, otherwise LDAP APIs return `400`.
@@ -139,12 +120,13 @@ OpenAPI docs:
 ```bash
 cd frontend
 npm install
+cp .env.example .env.development
 ```
 
-Development API target (optional, default already points to localhost:8000):
+Development API target:
 
 ```bash
-echo "VITE_API_TARGET=http://localhost:8000" > .env.development
+cat .env.development
 ```
 
 Run frontend dev server:
@@ -166,7 +148,7 @@ This example assumes:
 - project path: `/opt/samba-admin`
 - runtime user/group: `sambaadmin`
 - backend listen: `127.0.0.1:8000`
-- frontend listen: `0.0.0.0:4173` (Vite preview, `/api` proxied to backend)
+- frontend listen: `0.0.0.0:4173` (Vite preview for static files)
 
 ### 1) Prepare runtime and dependencies
 
@@ -196,19 +178,24 @@ npm run build
 ```bash
 sudo mkdir -p /etc/samba-admin
 sudo tee /etc/samba-admin/backend.env >/dev/null <<'EOF'
-SAMBA_SERVICE=samba-ad-dc
-SAMBA_CONF=/etc/samba/smb.conf
-SAMBA_TESTPARM=testparm
-ALLOW_APPLY=false
-
-LDAP_HOST=127.0.0.1
-LDAP_PORT=389
-LDAP_USE_SSL=false
+# Change these LDAP values to your environment
+LDAP_HOST=10.211.55.10
+LDAP_PORT=636
+LDAP_USE_SSL=true
 LDAP_START_TLS=false
 LDAP_TLS_SKIP_VERIFY=true
-LDAP_BIND_USER=Administrator@EXAMPLE.COM
-LDAP_BIND_PASSWORD=change_me
-LDAP_BASE_DN=DC=example,DC=com
+LDAP_BIND_USER=Administrator@EVMS.BSTU.EDU
+LDAP_BIND_PASSWORD=
+LDAP_BASE_DN=DC=evms,DC=bstu,DC=edu
+
+# Required: set real bind password
+# LDAP_BIND_PASSWORD=your_real_password
+
+# Optional Samba compatibility settings (not required in LDAP-only mode)
+# SAMBA_SERVICE=samba-ad-dc
+# SAMBA_CONF=/etc/samba/smb.conf
+# SAMBA_TESTPARM=testparm
+# ALLOW_APPLY=false
 EOF
 sudo chmod 600 /etc/samba-admin/backend.env
 ```
@@ -226,10 +213,14 @@ PartOf=samba-admin.service
 
 [Service]
 Type=simple
+# Change to the runtime user/group on your server
 User=sambaadmin
 Group=sambaadmin
+# Change to your real project path
 WorkingDirectory=/opt/samba-admin/backend
+# Change if you store env in a different file
 EnvironmentFile=/etc/samba-admin/backend.env
+# Change python venv path / bind host / port if needed
 ExecStart=/opt/samba-admin/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
@@ -252,10 +243,14 @@ PartOf=samba-admin.service
 
 [Service]
 Type=simple
+# Change to the runtime user/group on your server
 User=sambaadmin
 Group=sambaadmin
+# Change to your real project path
 WorkingDirectory=/opt/samba-admin/frontend
+# Change backend target if backend host/port differs
 Environment=VITE_API_TARGET=http://127.0.0.1:8000
+# Change npm path / host / port if needed
 ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 4173
 Restart=on-failure
 RestartSec=5
@@ -278,6 +273,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Keep as-is; this is only a wrapper unit for start/stop grouping
 RemainAfterExit=yes
 ExecStart=/usr/bin/true
 ExecStop=/usr/bin/true
@@ -322,9 +318,17 @@ sudo systemctl restart samba-admin-frontend.service
 - `GET /health`
 - `GET /api/ldap/health`
 - `GET /api/ldap/users`
+  - query: `view=full|list|dashboard|tree` (default `full`)
 - `GET /api/ldap/groups`
+  - query:
+    - `include_members=true|false` (default `true`)
+    - `include_description=true|false` (default `true`)
 - `GET /api/ldap/tree`
+  - query: `root_group=<cn>` (optional)
 - `GET /api/ldap/ou-tree`
+  - query:
+    - `include_users=true|false` (default `true`)
+    - `user_view=full|list|dashboard|tree` (default `full`)
 
 ### OU operations
 - `POST /api/ldap/ou`
@@ -346,6 +350,10 @@ sudo systemctl restart samba-admin-frontend.service
     - `password_length`: default `12`
   - response includes per-row status and generated passwords for newly created users
 - `GET /api/users/export`
+  - query:
+    - `keyword=<text>` (optional)
+    - `ou_dn=<dn>` (optional)
+    - `group_cn=<cn>` (repeatable)
   - downloads CSV with columns:
     `username, first_name, last_name, display_name, student_id, paid_flag, upn, ou_path, groups, dn`
 
@@ -381,6 +389,10 @@ Minimal example:
 Петров Петр Сергеевич
 Сидорова Анна
 ```
+
+More sample files:
+- `samples/user-import/README.md`
+- `samples/user-import/group-ii-2025.txt`
 
 Create user example:
 
