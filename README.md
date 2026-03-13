@@ -138,7 +138,12 @@ Configured in backend env:
 - `APP_LOG_DIR` default `backend/app/data/logs`
 - `APP_LOG_FILE` default `backend.log`
 - `APP_LOG_MAX_BYTES` default `10485760` (10MB per rotated file)
+- `APP_LOG_BACKUP_COUNT` default `20` (number of rotated backup files to keep)
 - `APP_LOG_RETAIN_DAYS` default `7`
+
+Behavior:
+- Log rotation by file size is automatic at runtime via `RotatingFileHandler`.
+- Old-log cleanup by `APP_LOG_RETAIN_DAYS` runs on backend startup (not a periodic background task).
 
 ## 10. Development Conventions
 
@@ -172,3 +177,126 @@ Created automatically on first startup:
 - password: `admin123`
 
 Change password immediately in System Management.
+
+## 13. Server Deployment with systemd
+
+Use separate units for backend/frontend, plus one general wrapper unit to manage both together.
+
+### 1) Backend service
+
+Create `/etc/systemd/system/samba-admin-backend.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+PartOf=samba-admin.service
+
+[Service]
+Type=simple
+# CHANGE: runtime user/group that has access to project files
+User=sambaadmin
+Group=sambaadmin
+# CHANGE: absolute backend path on your server
+WorkingDirectory=/opt/samba-admin/backend
+# CHANGE: env file location (must be readable by systemd)
+EnvironmentFile=/etc/samba-admin/backend.env
+# CHANGE: uvicorn path (venv), bind host/port as needed
+ExecStart=/opt/samba-admin/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Recommended env-file workflow (use project template, do not hand-write from scratch):
+
+```bash
+# 1) Start from backend/.env.example in this repo (single source of truth).
+# 2) Adjust values for your production environment (LDAP host, bind user, secrets, etc.).
+# 3) Install it as systemd EnvironmentFile.
+sudo install -d -m 755 /etc/samba-admin
+sudo cp /opt/samba-admin/backend/.env.example /etc/samba-admin/backend.env
+sudo chmod 600 /etc/samba-admin/backend.env
+sudo nano /etc/samba-admin/backend.env
+```
+
+Notes:
+- `backend/.env.example` should contain all supported variables and comments.
+- Normal operation is: maintain `.env.example` in repo, then copy/rename it to `/etc/samba-admin/backend.env` on server.
+- Do not commit real secrets into git; keep production secrets only in `/etc/samba-admin/backend.env`.
+
+### 2) Frontend service
+
+Create `/etc/systemd/system/samba-admin-frontend.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Frontend (Vite Preview)
+After=network-online.target
+Wants=network-online.target
+PartOf=samba-admin.service
+
+[Service]
+Type=simple
+# CHANGE: runtime user/group
+User=sambaadmin
+Group=sambaadmin
+# CHANGE: absolute frontend path on your server
+WorkingDirectory=/opt/samba-admin/frontend
+# CHANGE: backend URL reachable from frontend service host
+Environment=VITE_API_TARGET=http://127.0.0.1:8000
+# CHANGE: npm path/port if your environment differs
+ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 4173
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 3) General stack service
+
+Create `/etc/systemd/system/samba-admin.service`:
+
+```ini
+[Unit]
+Description=Samba Admin Stack (Backend + Frontend)
+# Keep these names aligned with the two unit files above.
+Requires=samba-admin-backend.service samba-admin-frontend.service
+After=network-online.target samba-admin-backend.service samba-admin-frontend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Keep as-is: wrapper unit only, no long-running process here.
+ExecStart=/usr/bin/true
+ExecStop=/usr/bin/true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 4) Enable and manage
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now samba-admin.service
+
+sudo systemctl status samba-admin.service samba-admin-backend.service samba-admin-frontend.service
+sudo systemctl restart samba-admin.service
+sudo systemctl stop samba-admin.service
+sudo systemctl start samba-admin.service
+```
+
+Service logs:
+
+```bash
+sudo journalctl -u samba-admin-backend.service -f
+sudo journalctl -u samba-admin-frontend.service -f
+```
