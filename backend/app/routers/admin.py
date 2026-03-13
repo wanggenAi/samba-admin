@@ -106,6 +106,6 @@ def delete_user(
     current_user: dict = Depends(get_current_user),
     _: dict = Depends(require_permission("system.manage")),
 ):
-    if username == current_user["username"]:
+    if str(username).strip().lower() == str(current_user["username"]).strip().lower():
         raise HTTPException(status_code=400, detail="cannot delete current user")
     return auth_service.delete_user(username)

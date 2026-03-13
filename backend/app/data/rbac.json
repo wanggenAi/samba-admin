@@ -1,0 +1,61 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "password_hash": "pbkdf2_sha256$120000$ocK0UEFrdJVxDV/5utT59A==$O1CBg5KJUZNKpDHzsdVjLZsqYsVBdtrhGuknGbkuqFU=",
+      "roles": [
+        "super_admin"
+      ],
+      "disabled": false,
+      "created_at": "2026-03-13T09:04:47.972867+00:00",
+      "updated_at": "2026-03-13T09:04:47.973022+00:00"
+    }
+  ],
+  "roles": [
+    {
+      "name": "super_admin",
+      "description": "Full access to all features",
+      "permissions": [
+        "*"
+      ],
+      "builtin": true
+    },
+    {
+      "name": "operator",
+      "description": "Daily operations for users and OUs",
+      "permissions": [
+        "dashboard.view",
+        "users.view",
+        "users.create",
+        "users.edit",
+        "users.delete",
+        "users.import",
+        "users.export",
+        "ous.view",
+        "ous.create",
+        "ous.rename",
+        "ous.delete",
+        "config.view",
+        "versions.view"
+      ],
+      "builtin": true
+    },
+    {
+      "name": "viewer",
+      "description": "Read-only access to dashboard and lists",
+      "permissions": [
+        "dashboard.view",
+        "users.view",
+        "ous.view",
+        "config.view",
+        "versions.view"
+      ],
+      "builtin": true
+    }
+  ],
+  "meta": {
+    "initialized_at": "2026-03-13T09:04:47.973024+00:00",
+    "default_admin_username": "admin"
+  },
+  "permissions": []
+}

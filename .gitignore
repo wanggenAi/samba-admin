@@ -17,9 +17,8 @@ venv/
 # ========================
 # FastAPI / Backend data
 # ========================
-backend/data/versions/*
-backend/data/model.json
-backend/app/data/rbac.json
+backend/app/data/logs/*
+backend/app/data/versions/*
 
 # ========================
 # Node / Frontend

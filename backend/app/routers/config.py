@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from ..models.schema import ConfigModel
+from ..schemas.samba import ConfigModel
 from .authz import require_permission
 from ..services.samba_service import validate_config, apply_config
 

@@ -5,10 +5,10 @@
       <button class="btn" type="button" @click="closeWindow">Close</button>
     </div>
 
-    <section class="panel">
+    <section class="panel panel-loading-host" :class="{ loading: dataLoading }">
       <div class="panel-head">
         <h3>Update Existing User</h3>
-        <button class="btn primary" :disabled="submitting || loadingInitial" @click="submit">
+        <button class="btn primary" :disabled="submitting || dataLoading" @click="submit">
           {{ submitting ? "Saving..." : "Save" }}
         </button>
       </div>
@@ -81,6 +81,7 @@
 
       <div class="ou-picker">
         <label>OU Path (single select)</label>
+        <div class="muted">Single-select only: each user has one physical OU location in LDAP.</div>
         <div class="combo" @click="focusOuInput">
           <span v-if="selectedOuPath" class="chip">
             {{ selectedOuPath }}
@@ -94,7 +95,7 @@
             placeholder='Type OU path (e.g. Students > ms > 63/24 or ms-63/24), Enter to set'
             @focus="ouDropdownOpen = true"
             @keydown.enter.prevent="applyTypedOuPath"
-            @keydown.esc="ouDropdownOpen = false"
+            @keydown.esc.prevent="closeOuDropdown"
           />
         </div>
         <div v-if="ouDropdownOpen" class="dropdown">
@@ -119,10 +120,12 @@
             No OU path matched.
           </div>
         </div>
+        <span v-if="fieldErrors.ou_path" class="field-error">{{ fieldErrors.ou_path }}</span>
       </div>
 
       <div class="group-picker">
         <label>Groups (multi-select, CN)</label>
+        <div class="muted">Save applies exact membership: selected groups are kept, unselected groups are removed.</div>
 
         <div class="combo" @click="focusGroupInput">
           <span v-for="cn in selectedGroups" :key="cn" class="chip">
@@ -138,20 +141,29 @@
             placeholder="Type to search or input a group CN, then Enter"
             @focus="groupDropdownOpen = true"
             @keydown.enter.prevent="addTypedGroup"
-            @keydown.esc="groupDropdownOpen = false"
+            @keydown.esc.prevent="closeGroupDropdown"
           />
         </div>
 
         <div v-if="groupDropdownOpen" class="dropdown">
-          <button
-            v-for="g in filteredGroups"
+          <div class="dropdown-actions">
+            <button type="button" class="btn btn-xs" @click="selectAllVisibleGroups">Select visible</button>
+            <button type="button" class="btn btn-xs" :disabled="!selectedGroups.length" @click="clearVisibleGroups">
+              Clear visible
+            </button>
+          </div>
+          <label
+            v-for="(g, idx) in filteredGroups"
             :key="g.cn"
-            type="button"
-            class="dropdown-item"
-            @click="pickGroup(g.cn)"
+            class="dropdown-item checkbox-item"
           >
-            {{ g.cn }}
-          </button>
+            <input
+              type="checkbox"
+              :checked="isGroupChecked(g.cn)"
+              @change="onToggleGroupFromList(g.cn, idx, $event)"
+            />
+            <span>{{ g.cn }}</span>
+          </label>
           <button
             v-if="groupKeyword && !hasExactGroup"
             type="button"
@@ -170,6 +182,7 @@
 
       <p v-if="submitMessage" class="ok">{{ submitMessage }}</p>
       <p v-if="error" class="error">{{ error }}</p>
+      <DataLoadingOverlay :show="dataLoading" text="Loading form data..." />
     </section>
 
     <div v-if="submitPhase !== 'idle'" class="submit-mask" role="status" aria-live="polite">
@@ -189,8 +202,9 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from "vue";
+import DataLoadingOverlay from "../../components/DataLoadingOverlay.vue";
 import { useRoute, useRouter } from "vue-router";
-import { apiAddUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUsers } from "../api/client";
+import { apiAddUser, apiListLdapGroups, apiListLdapOuTree, apiListLdapUserGroups, apiListLdapUsers } from "../../api/client";
 
 const route = useRoute();
 const router = useRouter();
@@ -209,11 +223,13 @@ const submitMessage = ref("");
 const submitPhase = ref("idle");
 const showPassword = ref(false);
 const displayNameCustomized = ref(false);
+const initialReady = ref(false);
 
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
 const groupDropdownOpen = ref(false);
 const groupInputRef = ref(null);
+const lastGroupToggleIndex = ref(-1);
 
 const ouKeyword = ref("");
 const selectedOuPath = ref("");
@@ -239,10 +255,9 @@ const form = ref({
 });
 
 const filteredGroups = computed(() => {
-  const kw = groupKeyword.value.toLowerCase();
-  const available = groups.value.filter((g) => !selectedGroups.value.includes(g.cn));
-  if (!kw) return available.slice(0, 20);
-  return available.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 20);
+  const kw = groupKeyword.value.trim().toLowerCase();
+  if (!kw) return groups.value.slice(0, 100);
+  return groups.value.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 100);
 });
 
 const hasExactGroup = computed(() => {
@@ -276,14 +291,7 @@ const hasExactOuPath = computed(() => {
   if (!kw) return false;
   return ouPathOptions.value.some((p) => p.toLowerCase() === kw);
 });
-
-function normalizeDn(dn) {
-  return String(dn || "")
-    .split(",")
-    .map((p) => p.trim().toLowerCase())
-    .filter(Boolean)
-    .join(",");
-}
+const dataLoading = computed(() => loadingInitial.value || loadingGroups.value || loadingOuTree.value);
 
 function extractOuPathFromDn(dn) {
   if (!dn) return "";
@@ -299,7 +307,6 @@ function pickGroup(cn) {
   if (!cn || selectedGroups.value.includes(cn)) return;
   selectedGroups.value = [...selectedGroups.value, cn];
   groupKeyword.value = "";
-  groupDropdownOpen.value = false;
 }
 
 function addTypedGroup() {
@@ -312,8 +319,65 @@ function removeGroup(cn) {
   selectedGroups.value = selectedGroups.value.filter((x) => x !== cn);
 }
 
+function isGroupChecked(cn) {
+  return selectedGroups.value.includes(cn);
+}
+
+function setGroupChecked(cn, checked) {
+  if (!cn) return;
+  if (checked) {
+    if (!selectedGroups.value.includes(cn)) {
+      selectedGroups.value = [...selectedGroups.value, cn];
+    }
+    return;
+  }
+  selectedGroups.value = selectedGroups.value.filter((x) => x !== cn);
+}
+
+function onToggleGroupFromList(cn, index, event) {
+  const checked = Boolean(event?.target?.checked);
+  if (!event?.shiftKey || lastGroupToggleIndex.value < 0) {
+    setGroupChecked(cn, checked);
+    lastGroupToggleIndex.value = index;
+    return;
+  }
+
+  const start = Math.min(lastGroupToggleIndex.value, index);
+  const end = Math.max(lastGroupToggleIndex.value, index);
+  const next = new Set(selectedGroups.value);
+  const list = filteredGroups.value;
+  for (let i = start; i <= end; i += 1) {
+    const targetCn = String(list[i]?.cn || "").trim();
+    if (!targetCn) continue;
+    if (checked) next.add(targetCn);
+    else next.delete(targetCn);
+  }
+  selectedGroups.value = Array.from(next);
+  lastGroupToggleIndex.value = index;
+}
+
+function selectAllVisibleGroups() {
+  const next = new Set(selectedGroups.value);
+  for (const g of filteredGroups.value) {
+    const cn = String(g?.cn || "").trim();
+    if (cn) next.add(cn);
+  }
+  selectedGroups.value = Array.from(next);
+}
+
+function clearVisibleGroups() {
+  if (!selectedGroups.value.length) return;
+  const visible = new Set(filteredGroups.value.map((g) => String(g?.cn || "").trim()).filter(Boolean));
+  selectedGroups.value = selectedGroups.value.filter((cn) => !visible.has(cn));
+}
+
 function focusGroupInput() {
   groupInputRef.value?.focus();
+}
+
+function closeGroupDropdown() {
+  groupDropdownOpen.value = false;
+  groupKeyword.value = "";
 }
 
 function buildDisplayName(firstName, lastName) {
@@ -370,6 +434,11 @@ function focusOuInput() {
   ouInputRef.value?.focus();
 }
 
+function closeOuDropdown() {
+  ouDropdownOpen.value = false;
+  ouKeyword.value = "";
+}
+
 function parseOuPath(raw) {
   if (!raw) return [];
   const value = String(raw).trim();
@@ -397,6 +466,13 @@ function parseOuPath(raw) {
 }
 
 function closeWindow() {
+  if (window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({ type: "USER_EDITOR_CLOSED" }, window.location.origin);
+    } catch {
+      // ignore cross-window notification errors
+    }
+  }
   window.close();
 }
 
@@ -406,11 +482,16 @@ function sleep(ms) {
 
 function onClickOutside(event) {
   const target = event.target;
-  if (!target.closest(".group-picker")) groupDropdownOpen.value = false;
-  if (!target.closest(".ou-picker")) ouDropdownOpen.value = false;
+  if (!(target instanceof Element)) return;
+  if (!target.closest(".group-picker")) {
+    closeGroupDropdown();
+  }
+  if (!target.closest(".ou-picker")) {
+    closeOuDropdown();
+  }
 }
 
-function prefillFromUser(user) {
+function prefillFromUser(user, currentGroupCns = []) {
   form.value.username = user?.sAMAccountName || sourceUsername;
   form.value.student_id = user?.employeeID || "";
 
@@ -426,15 +507,7 @@ function prefillFromUser(user) {
 
   form.value.paid_flag = user?.employeeType || "";
   selectedOuPath.value = extractOuPathFromDn(user?.dn || "");
-
-  const userDn = normalizeDn(user?.dn || "");
-  const nextGroups = [];
-  for (const g of groups.value) {
-    const members = Array.isArray(g?.members) ? g.members : [];
-    const hit = members.some((m) => normalizeDn(m) === userDn);
-    if (hit && g?.cn) nextGroups.push(g.cn);
-  }
-  selectedGroups.value = nextGroups;
+  selectedGroups.value = [...currentGroupCns];
 }
 
 async function refreshUsers() {
@@ -444,7 +517,7 @@ async function refreshUsers() {
 async function refreshGroups() {
   loadingGroups.value = true;
   try {
-    groups.value = await apiListLdapGroups({ includeMembers: true, includeDescription: false });
+    groups.value = await apiListLdapGroups({ includeMembers: false, includeDescription: false });
   } finally {
     loadingGroups.value = false;
   }
@@ -466,6 +539,7 @@ async function loadInitial() {
   }
 
   loadingInitial.value = true;
+  initialReady.value = false;
   error.value = "";
   try {
     await Promise.all([refreshUsers(), refreshGroups(), refreshOuTree()]);
@@ -474,7 +548,14 @@ async function loadInitial() {
       error.value = `user not found: ${sourceUsername}`;
       return;
     }
-    prefillFromUser(user);
+    const memberships = await apiListLdapUserGroups(sourceUsername);
+    const currentGroupCns = Array.isArray(memberships)
+      ? memberships
+          .map((g) => String(g?.cn || "").trim())
+          .filter(Boolean)
+      : [];
+    prefillFromUser(user, currentGroupCns);
+    initialReady.value = true;
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
@@ -483,6 +564,10 @@ async function loadInitial() {
 }
 
 async function submit() {
+  if (!initialReady.value) {
+    error.value = "Cannot submit because initial user data is not loaded yet.";
+    return;
+  }
   submitting.value = true;
   submitPhase.value = "submitting";
   error.value = "";
@@ -501,6 +586,7 @@ async function submit() {
       paid_flag: form.value.paid_flag || null,
       groups: selectedGroups.value,
       ou_path: parseOuPath(selectedOuPath.value),
+      sync_groups: true,
     };
 
     const res = await apiAddUser(payload);
@@ -514,7 +600,7 @@ async function submit() {
       } catch {
         // ignore
       }
-      window.close();
+      closeWindow();
       return;
     }
 
@@ -566,6 +652,12 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 14px;
   background: #fff;
+}
+.panel-loading-host {
+  position: relative;
+}
+.panel-loading-host.loading {
+  pointer-events: none;
 }
 .panel-head {
   display: flex;
@@ -661,12 +753,32 @@ input {
   display: grid;
   gap: 4px;
 }
+.dropdown-actions {
+  display: flex;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
+  padding-bottom: 4px;
+}
+.btn-xs {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+}
 .dropdown-item {
   text-align: left;
   border: 1px solid transparent;
   border-radius: 6px;
   background: #fff;
   padding: 8px;
+}
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }
 .dropdown-item:hover {
   background: #f3f4f6;

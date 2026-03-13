@@ -128,6 +128,7 @@
           </div>
         </div>
 
+        <div class="tree-body-host" :class="{ loading: loadingOuTree }">
         <div v-if="!ouTreeLines.length" class="muted">No OU nodes found under current base DN.</div>
         <div v-else class="ou-tree-wrap">
           <div
@@ -136,7 +137,7 @@
             class="ou-row"
             :class="{
               clickable: line.type === 'ou',
-              active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase(),
+              active: line.type === 'ou' && isSelectedOuDn(line.dn),
             }"
             :style="{ paddingLeft: `${line.depth * 18}px` }"
             :title="line.dn"
@@ -156,6 +157,8 @@
             <span class="main-text">{{ line.text }}</span>
           </div>
         </div>
+          <DataLoadingOverlay :show="loadingOuTree" text="Loading OU tree..." />
+        </div>
       </section>
 
       <section class="panel list-panel">
@@ -163,9 +166,10 @@
           <div class="head-left">
             <h3>User List</h3>
             <div class="active-filters">
-              <div v-if="selectedOuDn" class="active-filter">
+              <div v-if="selectedOuDns.length" class="active-filter">
                 <span class="muted">OU filter:</span>
-                <code>{{ selectedOuPath || selectedOuDn }}</code>
+                <code>{{ selectedOuFilterLabel }}</code>
+                <button class="chip-clear-btn" type="button" @click="clearOuFilter">Clear</button>
               </div>
               <div v-if="selectedGroups.length" class="active-filter">
                 <span class="muted">Group filter:</span>
@@ -229,7 +233,7 @@
           </div>
         </div>
 
-        <div class="table-wrap">
+        <div class="table-wrap" :class="{ loading: loadingUsers }">
           <table class="user-table">
             <thead>
               <tr>
@@ -240,8 +244,8 @@
                     @change="toggleSelectCurrentPage($event.target.checked)"
                   />
                 </th>
+                <th class="display-col">Display Name</th>
                 <th class="username-col">Username</th>
-                <th>Display Name</th>
                 <th>First Name</th>
                 <th>Last Name</th>
                 <th>Student ID</th>
@@ -264,10 +268,12 @@
                     @change="toggleSelectUser(resolveUsername(u), $event.target.checked)"
                   />
                 </td>
+                <td class="display-col" :class="{ 'is-empty-cell': !hasValue(u.displayName) }" :title="u.displayName || EMPTY_MARK">
+                  {{ u.displayName || EMPTY_MARK }}
+                </td>
                 <td class="mono username-col" :class="{ 'is-empty-cell': !hasValue(u.sAMAccountName) }" :title="u.sAMAccountName || EMPTY_MARK">
                   {{ u.sAMAccountName || EMPTY_MARK }}
                 </td>
-                <td :class="{ 'is-empty-cell': !hasValue(u.displayName) }">{{ u.displayName || EMPTY_MARK }}</td>
                 <td :class="{ 'is-empty-cell': !hasValue(u.givenName) }">{{ u.givenName || EMPTY_MARK }}</td>
                 <td :class="{ 'is-empty-cell': !hasValue(u.sn) }">{{ u.sn || EMPTY_MARK }}</td>
                 <td class="mono" :class="{ 'is-empty-cell': !hasValue(u.employeeID) }">{{ u.employeeID || EMPTY_MARK }}</td>
@@ -277,18 +283,37 @@
                   {{ formatLdapTime(userUpdatedAt(u)) }}
                 </td>
                 <td>
-                  <div class="group-cell">
+                  <div class="group-cell" :class="{ expanded: isGroupsExpanded(u.dn) }">
                     <span
-                      v-for="cn in groupsByUser(u)"
+                      v-for="cn in visibleGroupsByUser(u)"
                       :key="`${u.dn}:${cn}`"
                       class="group-chip"
+                      :title="cn"
                     >
                       {{ cn }}
                     </span>
                     <span v-if="!groupsByUser(u).length" class="empty-mark">{{ EMPTY_MARK }}</span>
+                    <button
+                      v-if="hasMoreGroups(u)"
+                      type="button"
+                      class="cell-more-btn"
+                      @click.stop="toggleGroupsExpanded(u.dn)"
+                    >
+                      {{ isGroupsExpanded(u.dn) ? "Less" : `+${hiddenGroupCount(u)} more` }}
+                    </button>
                   </div>
                 </td>
-                <td class="dn mono" :title="u.dn">{{ u.dn }}</td>
+                <td class="dn mono" :class="{ expanded: isDnExpanded(u.dn) }" :title="u.dn">
+                  <span class="dn-text">{{ u.dn }}</span>
+                  <button
+                    v-if="u.dn && u.dn.length > 42"
+                    type="button"
+                    class="cell-more-btn dn-more-btn"
+                    @click.stop="toggleDnExpanded(u.dn)"
+                  >
+                    {{ isDnExpanded(u.dn) ? "Less" : "More" }}
+                  </button>
+                </td>
                 <td>
                   <button
                     v-if="canEditUser"
@@ -300,17 +325,18 @@
                   </button>
                 </td>
               </tr>
-              <tr v-if="!filteredUsers.length" class="empty-row">
+              <tr v-if="!users.length" class="empty-row">
                 <td colspan="12" class="muted">No users found.</td>
               </tr>
             </tbody>
           </table>
+          <DataLoadingOverlay :show="loadingUsers" text="Loading users..." />
         </div>
 
-        <div class="pager" v-if="filteredUsers.length">
+        <div class="pager" v-if="totalUsers">
           <div class="pager-block pager-summary">
             <span class="muted">Total</span>
-            <strong>{{ filteredUsers.length }}</strong>
+            <strong>{{ totalUsers }}</strong>
             <span class="muted">users</span>
           </div>
 
@@ -326,9 +352,11 @@
           </div>
 
           <div class="pager-block pager-nav">
-            <button class="btn pager-btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
+            <button class="btn pager-btn" :disabled="loadingUsers || currentPage <= 1" @click="goPrevPage">Prev</button>
             <span class="page-indicator">Page {{ currentPage }} / {{ totalPages }}</span>
-            <button class="btn pager-btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
+            <button class="btn pager-btn" :disabled="loadingUsers || currentPage >= totalPages" @click="goNextPage">
+              Next
+            </button>
           </div>
         </div>
       </section>
@@ -338,15 +366,16 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
-import { useAuthStore } from "../auth/store";
+import DataLoadingOverlay from "../../components/DataLoadingOverlay.vue";
+import { useAuthStore } from "../../auth/store";
 import {
   apiDeleteUser,
   apiExportUsers,
   apiImportUsers,
   apiListLdapGroups,
   apiListLdapOuTree,
-  apiListLdapUsers,
-} from "../api/client";
+  apiListLdapUsersPage,
+} from "../../api/client";
 
 const auth = useAuthStore();
 const canCreateUser = computed(() => auth.hasPermission("users.create"));
@@ -356,8 +385,8 @@ const canImport = computed(() => auth.hasPermission("users.import"));
 const canExport = computed(() => auth.hasPermission("users.export"));
 
 const users = shallowRef([]);
+const totalUsers = ref(0);
 const groups = shallowRef([]);
-const userToGroupCns = shallowRef(new Map());
 const ouTree = shallowRef([]);
 const loadingUsers = ref(false);
 const loadingGroups = ref(false);
@@ -372,21 +401,34 @@ const ouKeyword = ref("");
 const groupKeyword = ref("");
 const selectedGroups = ref([]);
 const groupDropdownOpen = ref(false);
-const selectedOuDn = ref("");
-const selectedOuPath = ref("");
+const selectedOuDns = ref([]);
 const currentPage = ref(1);
 const pageSize = ref(10);
 const deletingBatch = ref(false);
 const selectedUsernames = ref([]);
 const expandedOuDns = ref(new Set());
+const expandedGroupUserDns = ref(new Set());
+const expandedDnUserDns = ref(new Set());
 const protectedUsernames = new Set(["krbtgt"]);
 const importInputRef = ref(null);
+const usersRequestSeq = ref(0);
+const suppressUsersFilterWatch = ref(false);
 const EMPTY_STR_LIST = Object.freeze([]);
 const EMPTY_MARK = "-";
+const GROUPS_COLLAPSED_COUNT = 2;
 const MAX_IMPORT_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORT_TOTAL_BYTES = 10 * 1024 * 1024;
 const importLimitPerFileText = `${(MAX_IMPORT_FILE_BYTES / (1024 * 1024)).toFixed(0)} MB`;
 const importLimitTotalText = `${(MAX_IMPORT_TOTAL_BYTES / (1024 * 1024)).toFixed(0)} MB`;
+const selectedOuDnKeySet = computed(() => new Set(selectedOuDns.value.map((dn) => normalizeDn(dn))));
+const selectedOuFilterLabel = computed(() => {
+  const paths = selectedOuDns.value
+    .map((dn) => extractOuPathFromDn(dn))
+    .filter((x) => x);
+  if (!paths.length) return "";
+  if (paths.length <= 2) return paths.join(", ");
+  return `${paths.slice(0, 2).join(", ")} +${paths.length - 2} more`;
+});
 
 const ouTreeLines = computed(() => {
   const kw = ouKeyword.value.trim().toLowerCase();
@@ -448,65 +490,12 @@ const filteredGroups = computed(() => {
   return groups.value.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 100);
 });
 
-const filteredUsers = computed(() => {
-  const out = [];
-  const ouFilter = selectedOuDn.value ? normalizeDn(selectedOuDn.value) : "";
-  const groupTargets = selectedGroups.value.length
-    ? new Set(selectedGroups.value.map((g) => g.toLowerCase()))
-    : null;
-  const kw = userKeyword.value.trim().toLowerCase();
-
-  for (const u of users.value) {
-    if (ouFilter) {
-      const parentDn = parentDnOfUser(u.dn || "");
-      if (!parentDn || normalizeDn(parentDn) !== ouFilter) continue;
-    }
-
-    const userGroups = groupsByUser(u);
-    if (groupTargets) {
-      if (!userGroups.length) continue;
-      if (!userGroups.some((g) => groupTargets.has(g.toLowerCase()))) continue;
-    }
-
-    if (kw) {
-      const ouPath = extractOuPathFromDn(u.dn || "");
-      const groupsText = userGroups.join(" ");
-      const fields = [
-        u.sAMAccountName,
-        u.displayName,
-        u.givenName,
-        u.sn,
-        u.employeeID,
-        u.employeeType,
-        u.userPrincipalName,
-        u.whenCreated,
-        u.whenChanged,
-        u.dn,
-        ouPath,
-        groupsText,
-      ];
-      if (!fields.some((value) => (value || "").toLowerCase().includes(kw))) continue;
-    }
-
-    out.push(u);
-  }
-
-  out.sort((a, b) => {
-    const diff = parseLdapTime(userUpdatedAt(b)) - parseLdapTime(userUpdatedAt(a));
-    if (diff !== 0) return diff;
-    const ua = String(a?.sAMAccountName || "").toLowerCase();
-    const ub = String(b?.sAMAccountName || "").toLowerCase();
-    return ua.localeCompare(ub);
-  });
-
-  return out;
+const totalPages = computed(() => {
+  return Math.max(1, Math.ceil(totalUsers.value / pageSize.value));
 });
 
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / pageSize.value)));
-
 const paginatedUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return filteredUsers.value.slice(start, start + pageSize.value);
+  return users.value;
 });
 
 const currentPageUsernames = computed(() =>
@@ -622,9 +611,49 @@ function isProtectedUsername(username) {
 }
 
 function groupsByUser(user) {
-  const key = normalizeDn(user?.dn || "");
-  if (!key) return EMPTY_STR_LIST;
-  return userToGroupCns.value.get(key) || EMPTY_STR_LIST;
+  const values = Array.isArray(user?.groups) ? user.groups : EMPTY_STR_LIST;
+  return values;
+}
+
+function isGroupsExpanded(dn) {
+  return expandedGroupUserDns.value.has(String(dn || ""));
+}
+
+function toggleGroupsExpanded(dn) {
+  const key = String(dn || "");
+  if (!key) return;
+  const next = new Set(expandedGroupUserDns.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedGroupUserDns.value = next;
+}
+
+function visibleGroupsByUser(user) {
+  const all = groupsByUser(user);
+  if (isGroupsExpanded(user?.dn)) return all;
+  return all.slice(0, GROUPS_COLLAPSED_COUNT);
+}
+
+function hiddenGroupCount(user) {
+  const all = groupsByUser(user);
+  return Math.max(0, all.length - GROUPS_COLLAPSED_COUNT);
+}
+
+function hasMoreGroups(user) {
+  return hiddenGroupCount(user) > 0;
+}
+
+function isDnExpanded(dn) {
+  return expandedDnUserDns.value.has(String(dn || ""));
+}
+
+function toggleDnExpanded(dn) {
+  const key = String(dn || "");
+  if (!key) return;
+  const next = new Set(expandedDnUserDns.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedDnUserDns.value = next;
 }
 
 function toggleGroup(cn, checked) {
@@ -685,7 +714,7 @@ async function onExportUsers() {
   try {
     const { filename, blob } = await apiExportUsers({
       keyword: userKeyword.value,
-      ouDn: selectedOuDn.value,
+      ouDns: selectedOuDns.value,
       groupCns: selectedGroups.value,
     });
     _downloadBlob(blob, filename);
@@ -756,11 +785,26 @@ function openEditWindow(user) {
 }
 
 function clearOuFilter() {
-  selectedOuDn.value = "";
-  selectedOuPath.value = "";
+  selectedOuDns.value = [];
+}
+
+function isSelectedOuDn(dn) {
+  const key = normalizeDn(dn);
+  return selectedOuDnKeySet.value.has(key);
+}
+
+function toggleSelectedOuDn(dn) {
+  const key = normalizeDn(dn);
+  if (!key) return;
+  const next = [...selectedOuDns.value];
+  const idx = next.findIndex((x) => normalizeDn(x) === key);
+  if (idx >= 0) next.splice(idx, 1);
+  else next.push(String(dn || "").trim());
+  selectedOuDns.value = next;
 }
 
 function onRefreshUsers() {
+  suppressUsersFilterWatch.value = true;
   userKeyword.value = "";
   groupKeyword.value = "";
   selectedGroups.value = [];
@@ -769,7 +813,10 @@ function onRefreshUsers() {
   currentPage.value = 1;
   selectedUsernames.value = [];
   actionMessage.value = "";
-  refreshAll();
+  Promise.resolve().then(() => {
+    suppressUsersFilterWatch.value = false;
+    refreshUsers();
+  });
 }
 
 function onRefreshTree() {
@@ -791,12 +838,7 @@ function onTreeLineClick(line) {
   if (!line || line.type !== "ou") return;
   // Switching OU should show that OU's users directly, without stale keyword filter.
   userKeyword.value = "";
-  if (selectedOuDn.value.toLowerCase() === (line.dn || "").toLowerCase()) {
-    clearOuFilter();
-    return;
-  }
-  selectedOuDn.value = line.dn;
-  selectedOuPath.value = line.path || "";
+  toggleSelectedOuDn(line.dn);
 }
 
 function onToggleOuExpand(line) {
@@ -851,7 +893,8 @@ async function onBatchDelete() {
   }
 
   selectedUsernames.value = [];
-  await refreshAll();
+  await refreshUsers();
+  refreshOuTree(false);
   deletingBatch.value = false;
 
   if (!failed.length) {
@@ -865,12 +908,22 @@ async function onBatchDelete() {
 }
 
 async function refreshUsers() {
+  const seq = usersRequestSeq.value + 1;
+  usersRequestSeq.value = seq;
   loadingUsers.value = true;
   error.value = "";
   try {
-    const payload = await apiListLdapUsers({ view: "list" });
-    // Keep only fields used by the Users page to reduce retained heap size.
-    users.value = (payload || []).map((u) => ({
+    const payload = await apiListLdapUsersPage({
+      view: "list",
+      page: currentPage.value,
+      pageSize: pageSize.value,
+      keyword: userKeyword.value,
+      ouDns: selectedOuDns.value,
+      groupCns: selectedGroups.value,
+    });
+    if (seq !== usersRequestSeq.value) return;
+    totalUsers.value = Number(payload?.total || 0);
+    users.value = (payload?.items || []).map((u) => ({
       dn: String(u?.dn || ""),
       sAMAccountName: String(u?.sAMAccountName || ""),
       displayName: String(u?.displayName || ""),
@@ -881,14 +934,16 @@ async function refreshUsers() {
       userPrincipalName: String(u?.userPrincipalName || ""),
       whenCreated: String(u?.whenCreated || ""),
       whenChanged: String(u?.whenChanged || ""),
+      groups: Array.isArray(u?.groups) ? u.groups.map((x) => String(x || "").trim()).filter(Boolean) : [],
     }));
     selectedUsernames.value = selectedUsernames.value.filter((name) =>
       users.value.some((u) => resolveUsername(u) === name)
     );
   } catch (e) {
+    if (seq !== usersRequestSeq.value) return;
     error.value = e?.message || String(e);
   } finally {
-    loadingUsers.value = false;
+    if (seq === usersRequestSeq.value) loadingUsers.value = false;
   }
 }
 
@@ -896,12 +951,11 @@ async function refreshGroups() {
   loadingGroups.value = true;
   error.value = "";
   try {
-    const payload = await apiListLdapGroups({ includeMembers: true, includeDescription: false });
+    const groupsPayload = await apiListLdapGroups({ includeMembers: false, includeDescription: false });
     const nextGroups = [];
     const seenGroupCns = new Set();
-    const nextUserToGroupCns = new Map();
 
-    for (const g of payload || []) {
+    for (const g of groupsPayload || []) {
       const cn = String(g?.cn || "").trim();
       if (!cn) continue;
 
@@ -909,23 +963,10 @@ async function refreshGroups() {
         seenGroupCns.add(cn);
         nextGroups.push({ cn });
       }
-
-      for (const memberDn of g?.members || []) {
-        const key = normalizeDn(memberDn);
-        if (!key) continue;
-        if (!nextUserToGroupCns.has(key)) nextUserToGroupCns.set(key, []);
-        const values = nextUserToGroupCns.get(key);
-        if (!values.includes(cn)) values.push(cn);
-      }
     }
 
     nextGroups.sort((a, b) => a.cn.localeCompare(b.cn));
-    for (const values of nextUserToGroupCns.values()) {
-      values.sort((a, b) => a.localeCompare(b));
-    }
-
     groups.value = nextGroups;
-    userToGroupCns.value = nextUserToGroupCns;
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
@@ -933,8 +974,8 @@ async function refreshGroups() {
   }
 }
 
-async function refreshOuTree() {
-  loadingOuTree.value = true;
+async function refreshOuTree(showLoading = true) {
+  if (showLoading) loadingOuTree.value = true;
   error.value = "";
   try {
     const payload = await apiListLdapOuTree({ includeUsers: true, userView: "tree" });
@@ -952,7 +993,7 @@ async function refreshOuTree() {
   } catch (e) {
     error.value = e?.message || String(e);
   } finally {
-    loadingOuTree.value = false;
+    if (showLoading) loadingOuTree.value = false;
   }
 }
 
@@ -970,20 +1011,27 @@ function goNextPage() {
 
 async function onWindowMessage(event) {
   if (event.origin !== window.location.origin) return;
-  if (!event.data || event.data.type !== "USER_CREATED_OR_UPDATED") return;
-  actionMessage.value = `Saved user: ${event.data.username || EMPTY_MARK}`;
-  await refreshAll();
+  if (!event.data) return;
+  if (event.data.type === "USER_CREATED_OR_UPDATED") {
+    actionMessage.value = `Saved user: ${event.data.username || EMPTY_MARK}`;
+  } else if (event.data.type !== "USER_EDITOR_CLOSED") {
+    return;
+  }
+  await refreshUsers();
+  refreshOuTree(false);
 }
 
 function onClickOutside(event) {
   const target = event.target;
+  if (!(target instanceof Element)) return;
   if (!target.closest(".group-filter-inline")) groupDropdownOpen.value = false;
 }
 
 onMounted(async () => {
   window.addEventListener("message", onWindowMessage);
   document.addEventListener("click", onClickOutside);
-  await refreshAll();
+  await refreshUsers();
+  void Promise.allSettled([refreshGroups(), refreshOuTree()]);
 });
 
 onUnmounted(() => {
@@ -992,15 +1040,27 @@ onUnmounted(() => {
   closeImportReport();
   if (importInputRef.value) importInputRef.value.value = "";
   users.value = [];
+  totalUsers.value = 0;
   groups.value = [];
-  userToGroupCns.value = new Map();
   ouTree.value = [];
   selectedUsernames.value = [];
+  expandedGroupUserDns.value = new Set();
+  expandedDnUserDns.value = new Set();
   expandedOuDns.value = new Set();
 });
 
-watch([userKeyword, selectedOuDn, selectedGroups, pageSize], () => {
-  currentPage.value = 1;
+watch([userKeyword, selectedOuDns, selectedGroups, pageSize], () => {
+  if (suppressUsersFilterWatch.value) return;
+  if (currentPage.value !== 1) {
+    currentPage.value = 1;
+    return;
+  }
+  refreshUsers();
+});
+
+watch(currentPage, () => {
+  if (suppressUsersFilterWatch.value) return;
+  refreshUsers();
 });
 
 watch(totalPages, (next) => {
@@ -1168,8 +1228,8 @@ watch(totalPages, (next) => {
 }
 .tree-panel,
 .list-panel {
-  height: 68vh;
-  min-height: 520px;
+  height: 76vh;
+  min-height: 620px;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1296,6 +1356,15 @@ watch(totalPages, (next) => {
   background: #f1f5f9;
   width: fit-content;
 }
+.chip-clear-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+}
 .active-filters {
   display: flex;
   gap: 8px;
@@ -1351,17 +1420,43 @@ watch(totalPages, (next) => {
 .group-cell {
   display: flex;
   gap: 4px;
+  flex-wrap: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  align-items: center;
+}
+.group-cell.expanded {
   flex-wrap: wrap;
-  max-width: 280px;
+  max-width: 260px;
+  white-space: normal;
 }
 .group-chip {
   background: #f1f5f9;
   color: #334155;
   border: 1px solid #dbe3ef;
   border-radius: 999px;
-  padding: 1px 8px;
-  font-size: 12px;
+  padding: 0 7px;
+  font-size: 11px;
   line-height: 1.4;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell-more-btn {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 2px;
+  cursor: pointer;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.cell-more-btn:hover {
+  text-decoration: underline;
 }
 .empty-mark {
   display: inline-block;
@@ -1375,6 +1470,7 @@ watch(totalPages, (next) => {
   color: #94a3b8;
 }
 .table-wrap {
+  position: relative;
   flex: 1;
   overflow: auto;
   border: 1px solid #e6edf4;
@@ -1382,23 +1478,35 @@ watch(totalPages, (next) => {
   background: #fff;
   max-height: none;
 }
+.table-wrap.loading {
+  pointer-events: none;
+}
+.tree-body-host {
+  position: relative;
+  min-height: 120px;
+}
+.tree-body-host.loading {
+  pointer-events: none;
+}
 .user-table {
   width: 100%;
-  min-width: 1200px;
+  min-width: 1020px;
   border-collapse: separate;
   border-spacing: 0;
 }
 .user-table th,
 .user-table td {
   border-bottom: 1px solid #edf2f7;
-  padding: 11px 12px;
+  padding: 8px 9px;
   text-align: left;
   vertical-align: top;
+  font-size: 13px;
 }
 .user-table th {
-  font-size: 13px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
   color: #64748b;
   background: #f8fbff;
   position: sticky;
@@ -1406,12 +1514,30 @@ watch(totalPages, (next) => {
   z-index: 1;
 }
 .check-col {
-  width: 44px;
+  width: 38px;
   text-align: center !important;
   position: sticky;
   left: 0;
   z-index: 3;
   background: #fff;
+}
+.display-col {
+  width: 220px;
+  min-width: 220px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  position: sticky;
+  left: 38px;
+  z-index: 2;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.01em;
+  line-height: 1.3;
 }
 .username-col {
   width: 160px;
@@ -1420,18 +1546,14 @@ watch(totalPages, (next) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  position: sticky;
-  left: 44px;
-  z-index: 2;
-  background: #fff;
 }
 .user-table th.check-col,
-.user-table th.username-col {
+.user-table th.display-col {
   z-index: 5;
   background: #f8fbff;
 }
 .user-table tbody tr:hover .check-col,
-.user-table tbody tr:hover .username-col {
+.user-table tbody tr:hover .display-col {
   background: #f8fbff;
 }
 .user-table tbody tr:hover {
@@ -1551,17 +1673,42 @@ select {
 }
 .main-text {
   color: #0f172a;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.1;
   font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
   font-weight: 600;
 }
 .dn {
-  max-width: 520px;
+  max-width: 360px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: #475569;
+}
+.dn .dn-text {
+  display: inline-block;
+  max-width: calc(100% - 42px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.dn.expanded {
+  white-space: normal;
+}
+.dn.expanded .dn-text {
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-all;
+}
+.dn-more-btn {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.user-table td .btn {
+  height: 32px;
+  padding: 0 11px;
+  font-size: 13px;
 }
 .error {
   color: #b00020;

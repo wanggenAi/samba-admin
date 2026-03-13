@@ -20,7 +20,7 @@
     <section class="stats-grid">
       <article class="stat-card total">
         <div class="stat-label">Total Users</div>
-        <div class="stat-value">{{ users.length }}</div>
+        <div class="stat-value">{{ allUsersTotal }}</div>
       </article>
       <article class="stat-card recent">
         <div class="stat-label">Logged In (Last 3 Days)</div>
@@ -65,9 +65,9 @@
             class="btn ou-trigger-btn"
             type="button"
             :disabled="loading"
-            @click="ouDropdownOpen = !ouDropdownOpen"
+            @click="toggleOuDropdown"
           >
-            {{ selectedOuLabel ? `OU: ${selectedOuLabel}` : "OU: All OUs" }}
+            {{ selectedOuLabel }}
           </button>
           <div v-if="ouDropdownOpen" class="ou-dropdown-panel">
             <input
@@ -79,7 +79,7 @@
             <button
               class="btn ou-all-btn"
               type="button"
-              :class="{ active: !selectedOuDn }"
+              :class="{ active: !selectedOuDns.length }"
               @click="clearOuFilter"
             >
               All OUs
@@ -89,7 +89,7 @@
                 v-for="line in ouTreeLines"
                 :key="line.key"
                 class="ou-row"
-                :class="{ active: selectedOuKey === line.dnKey }"
+                :class="{ active: isOuSelected(line.dn) }"
                 :style="{ paddingLeft: `${line.depth * 16}px` }"
               >
                 <button
@@ -108,13 +108,30 @@
                   :title="line.dn"
                   @click="selectOu(line)"
                 >
+                  <input
+                    type="checkbox"
+                    class="ou-row-check"
+                    :checked="isOuSelected(line.dn)"
+                    @click.stop
+                    @change.stop="toggleOuSelection(line.dn)"
+                  />
                   <span class="ou-tag">OU</span>
                   <span class="ou-name">{{ line.ou }}</span>
                 </button>
               </div>
+              <div v-if="loadingOuTree" class="muted small-gap">Loading OUs...</div>
               <div v-if="!ouTreeLines.length" class="muted small-gap">No OU matched.</div>
             </div>
+            <div v-if="selectedOuHitRows.length" class="ou-hit-summary">
+              <div class="muted">Current page hits by selected OU:</div>
+              <div class="ou-hit-list">
+                <span v-for="row in selectedOuHitRows" :key="row.dnKey" class="ou-hit-chip">
+                  {{ row.label }}: {{ row.hits }}
+                </span>
+              </div>
+            </div>
             <div class="ou-panel-actions">
+              <button class="btn" type="button" :disabled="!selectedOuDns.length" @click="clearOuFilter">Clear</button>
               <button class="btn" type="button" @click="ouDropdownOpen = false">Done</button>
             </div>
           </div>
@@ -125,7 +142,7 @@
             class="btn"
             type="button"
             :disabled="loading"
-            @click="groupDropdownOpen = !groupDropdownOpen"
+            @click="toggleGroupDropdown"
           >
             Groups ({{ selectedGroups.length }})
           </button>
@@ -145,6 +162,7 @@
                 />
                 <span>{{ g.cn }}</span>
               </label>
+              <div v-if="loadingGroups" class="muted">Loading groups...</div>
               <div v-if="!filteredGroups.length" class="muted">No groups matched.</div>
             </div>
             <div class="group-panel-actions">
@@ -161,7 +179,7 @@
 
       <div
         class="table-wrap"
-        :class="{ autoscroll: autoScrollEnabled }"
+        :class="{ autoscroll: autoScrollEnabled, loading }"
         ref="tableWrapRef"
         @wheel="onTableWheel"
       >
@@ -222,17 +240,18 @@
                 </span>
               </td>
             </tr>
-            <tr v-if="!filteredUsers.length" class="empty-row">
+            <tr v-if="!users.length" class="empty-row">
               <td colspan="8" class="muted">No users found.</td>
             </tr>
           </tbody>
         </table>
+        <DataLoadingOverlay :show="loading" text="Loading users..." />
       </div>
 
-      <div class="pager" v-if="filteredUsers.length">
+      <div class="pager" v-if="totalUsers">
         <div class="pager-block pager-summary">
           <span class="muted">Total</span>
-          <strong>{{ filteredUsers.length }}</strong>
+          <strong>{{ totalUsers }}</strong>
           <span class="muted">users</span>
         </div>
 
@@ -249,9 +268,9 @@
         </div>
 
         <div class="pager-block pager-nav">
-          <button class="btn pager-btn" :disabled="currentPage <= 1" @click="goPrevPage">Prev</button>
+          <button class="btn pager-btn" :disabled="loading || currentPage <= 1" @click="goPrevPage">Prev</button>
           <span class="page-indicator">Page {{ currentPage }} / {{ totalPages }}</span>
-          <button class="btn pager-btn" :disabled="currentPage >= totalPages" @click="goNextPage">Next</button>
+          <button class="btn pager-btn" :disabled="loading || currentPage >= totalPages" @click="goNextPage">Next</button>
         </div>
       </div>
     </section>
@@ -260,12 +279,14 @@
 
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import DataLoadingOverlay from "../../components/DataLoadingOverlay.vue";
 import {
+  apiLdapDashboardSummary,
   apiLdapHealth,
   apiListLdapGroups,
   apiListLdapOuTree,
-  apiListLdapUsers,
-} from "../api/client";
+  apiListLdapUsersPage,
+} from "../../api/client";
 
 const users = shallowRef([]);
 const groups = shallowRef([]);
@@ -273,17 +294,25 @@ const ouTree = shallowRef([]);
 const status = ref(null);
 const loading = ref(false);
 const error = ref("");
+const usersRequestSeq = ref(0);
+const totalUsers = ref(0);
+const allUsersTotal = ref(0);
+const recent3DaysLoginCount = ref(0);
 
 const keyword = ref("");
 const loginFrom = ref("");
 const loginTo = ref("");
-const selectedOuDn = ref("");
+const selectedOuDns = ref([]);
 const selectedGroups = ref([]);
 const groupKeyword = ref("");
 const groupDropdownOpen = ref(false);
+const loadingGroups = ref(false);
+const groupsLoaded = ref(false);
 
 const ouKeyword = ref("");
 const ouDropdownOpen = ref(false);
+const loadingOuTree = ref(false);
+const ouTreeLoaded = ref(false);
 const expandedOuDns = ref(new Set());
 
 const currentPage = ref(1);
@@ -293,40 +322,14 @@ const tableWrapRef = ref(null);
 const logRowRefs = ref([]);
 const autoScrollEnabled = ref(true);
 let autoScrollTimer = null;
+let refreshTimer = null;
 const EMPTY_STR_LIST = Object.freeze([]);
 const EMPTY_MARK = "-";
 const AUTO_SCROLL_STEP_PX = 1;
 const AUTO_SCROLL_INTERVAL_MS = 28;
 const seamlessLoopHeightPx = ref(0);
 
-const selectedOuKey = computed(() => normalizeDn(selectedOuDn.value));
-
-const userGroupListMap = computed(() => {
-  const out = new Map();
-  for (const g of groups.value) {
-    const cn = String(g?.cn || "").trim();
-    if (!cn) continue;
-    for (const memberDn of g?.members || []) {
-      const key = normalizeDn(memberDn);
-      if (!key) continue;
-      if (!out.has(key)) out.set(key, []);
-      const values = out.get(key);
-      if (!values.includes(cn)) values.push(cn);
-    }
-  }
-  for (const values of out.values()) {
-    values.sort((a, b) => a.localeCompare(b));
-  }
-  return out;
-});
-
-const recent3DaysLoginCount = computed(() => {
-  const threshold = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  return users.value.filter((u) => {
-    const loginTs = parseLdapTimestamp(u?.lastLogon);
-    return loginTs >= threshold;
-  }).length;
-});
+const selectedOuDnKeySet = computed(() => new Set(selectedOuDns.value.map((dn) => normalizeDn(dn))));
 
 const ouPathMap = computed(() => {
   const out = new Map();
@@ -342,9 +345,37 @@ const ouPathMap = computed(() => {
 });
 
 const selectedOuLabel = computed(() => {
-  const key = selectedOuKey.value;
-  if (!key) return "";
-  return ouPathMap.value.get(key) || "";
+  const count = selectedOuDns.value.length;
+  if (!count) return "OU: All OUs";
+  if (count === 1) {
+    const key = normalizeDn(selectedOuDns.value[0]);
+    const label = ouPathMap.value.get(key) || selectedOuDns.value[0];
+    return `OU: ${label}`;
+  }
+  return `OU: ${count} selected`;
+});
+
+const selectedOuHitRows = computed(() => {
+  if (!selectedOuDns.value.length) return [];
+  const targets = selectedOuDns.value.map((dn) => ({
+    dnRaw: String(dn || "").trim(),
+    dnKey: normalizeDn(dn),
+  }));
+  const rows = targets.map((target) => {
+    let hits = 0;
+    for (const user of users.value || []) {
+      const parent = normalizeDn(parentDnOfUser(user?.dn || ""));
+      if (!parent) continue;
+      if (parent === target.dnKey || parent.endsWith(`,${target.dnKey}`)) hits += 1;
+    }
+    return {
+      dnKey: target.dnKey,
+      label: ouPathMap.value.get(target.dnKey) || target.dnRaw,
+      hits,
+    };
+  });
+  rows.sort((a, b) => a.label.localeCompare(b.label));
+  return rows;
 });
 
 const ouTreeLines = computed(() => {
@@ -396,76 +427,8 @@ const filteredGroups = computed(() => {
   return groups.value.filter((g) => (g.cn || "").toLowerCase().includes(kw)).slice(0, 120);
 });
 
-const filteredUsers = computed(() => {
-  let items = users.value;
-
-  if (selectedOuDn.value) {
-    const target = normalizeDn(selectedOuDn.value);
-    items = items.filter((u) => {
-      const userParent = normalizeDn(parentDnOfUser(u.dn || ""));
-      return userParent === target || userParent.endsWith(`,${target}`);
-    });
-  }
-
-  if (selectedGroups.value.length) {
-    const targets = new Set(selectedGroups.value.map((x) => x.toLowerCase()));
-    items = items.filter((u) => {
-      const values = groupsByUser(u);
-      return values.some((x) => targets.has(x.toLowerCase()));
-    });
-  }
-
-  let fromTs = parseInputDateTime(loginFrom.value);
-  let toTs = parseInputDateTime(loginTo.value);
-  if (fromTs && toTs && fromTs > toTs) {
-    const tmp = fromTs;
-    fromTs = toTs;
-    toTs = tmp;
-  }
-  if (fromTs || toTs) {
-    const minTs = fromTs || 0;
-    const maxTs = toTs || Number.POSITIVE_INFINITY;
-    items = items.filter((u) => {
-      const loginTs = parseLdapTimestamp(u?.lastLogon);
-      if (!loginTs) return false;
-      return loginTs >= minTs && loginTs <= maxTs;
-    });
-  }
-
-  const kw = keyword.value.trim().toLowerCase();
-  if (kw) {
-    items = items.filter((u) => {
-      const fields = [
-        u.sAMAccountName,
-        u.displayName,
-        u.userPrincipalName,
-        u.givenName,
-        u.sn,
-        u.dn,
-        formatOuPathFromDn(u.dn),
-        groupsByUser(u).join(" "),
-        String(u.lastLogon || ""),
-        String(u.lastLogoff || ""),
-      ];
-      return fields.some((v) => String(v || "").toLowerCase().includes(kw));
-    });
-  }
-
-  return [...items].sort((a, b) => {
-    const tsDiff = latestActivityTs(b) - latestActivityTs(a);
-    if (tsDiff !== 0) return tsDiff;
-    const ua = String(a?.sAMAccountName || "").toLowerCase();
-    const ub = String(b?.sAMAccountName || "").toLowerCase();
-    return ua.localeCompare(ub);
-  });
-});
-
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredUsers.value.length / pageSize.value)));
-
-const paginatedUsers = computed(() => {
-  const start = (currentPage.value - 1) * pageSize.value;
-  return filteredUsers.value.slice(start, start + pageSize.value);
-});
+const totalPages = computed(() => Math.max(1, Math.ceil(totalUsers.value / pageSize.value)));
+const paginatedUsers = computed(() => users.value);
 
 const seamlessScrollActive = computed(() => autoScrollEnabled.value && paginatedUsers.value.length > 1);
 
@@ -521,13 +484,6 @@ function normalizeDn(dn) {
     .join(",");
 }
 
-function parentDnOfUser(dn) {
-  const raw = String(dn || "");
-  const idx = raw.indexOf(",");
-  if (idx < 0) return "";
-  return raw.slice(idx + 1);
-}
-
 function formatOuPathFromDn(dn) {
   const raw = String(dn || "");
   if (!raw) return "";
@@ -539,6 +495,13 @@ function formatOuPathFromDn(dn) {
     }
   }
   return ous.reverse().join(" > ");
+}
+
+function parentDnOfUser(dn) {
+  const raw = String(dn || "");
+  const idx = raw.indexOf(",");
+  if (idx < 0) return "";
+  return raw.slice(idx + 1);
 }
 
 function hasValue(value) {
@@ -556,9 +519,8 @@ function ouPathValue(user) {
 }
 
 function groupsByUser(user) {
-  const key = normalizeDn(user?.dn || "");
-  if (!key) return EMPTY_STR_LIST;
-  return userGroupListMap.value.get(key) || EMPTY_STR_LIST;
+  const values = Array.isArray(user?.groups) ? user.groups : EMPTY_STR_LIST;
+  return values;
 }
 
 function toggleGroup(cn, checked) {
@@ -578,14 +540,14 @@ function clearGroupFilters() {
 }
 
 function clearOuFilter() {
-  selectedOuDn.value = "";
+  selectedOuDns.value = [];
 }
 
 function resetFilters() {
   keyword.value = "";
   loginFrom.value = "";
   loginTo.value = "";
-  selectedOuDn.value = "";
+  selectedOuDns.value = [];
   ouKeyword.value = "";
   clearGroupFilters();
   currentPage.value = 1;
@@ -613,8 +575,25 @@ function toggleOuExpand(line) {
 
 function selectOu(line) {
   if (!line) return;
-  selectedOuDn.value = line.dn;
-  ouDropdownOpen.value = false;
+  toggleOuSelection(line.dn);
+}
+
+function isOuSelected(dn) {
+  const key = normalizeDn(dn);
+  return selectedOuDnKeySet.value.has(key);
+}
+
+function toggleOuSelection(dn) {
+  const key = normalizeDn(dn);
+  if (!key) return;
+  const next = [...selectedOuDns.value];
+  const idx = next.findIndex((x) => normalizeDn(x) === key);
+  if (idx >= 0) {
+    next.splice(idx, 1);
+  } else {
+    next.push(String(dn || "").trim());
+  }
+  selectedOuDns.value = next;
 }
 
 function parseInputDateTime(value) {
@@ -689,20 +668,71 @@ function activityToneClass(user) {
 }
 
 async function refreshAll() {
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  const seq = usersRequestSeq.value + 1;
+  usersRequestSeq.value = seq;
   loading.value = true;
   error.value = "";
   try {
-    const [health, nextUsers, nextGroups, nextOuTree] = await Promise.all([
+    let fromTs = parseInputDateTime(loginFrom.value);
+    let toTs = parseInputDateTime(loginTo.value);
+    if (fromTs && toTs && fromTs > toTs) {
+      const tmp = fromTs;
+      fromTs = toTs;
+      toTs = tmp;
+    }
+    const [health, pagePayload, summary] = await Promise.all([
       apiLdapHealth(),
-      apiListLdapUsers({ view: "dashboard" }),
-      apiListLdapGroups({ includeMembers: true, includeDescription: false }),
-      apiListLdapOuTree({ includeUsers: false }),
+      apiListLdapUsersPage({
+        view: "dashboard",
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        keyword: keyword.value,
+        ouDns: selectedOuDns.value,
+        ouScope: "subtree",
+        groupCns: selectedGroups.value,
+        loginFromMs: fromTs || undefined,
+        loginToMs: toTs || undefined,
+      }),
+      apiLdapDashboardSummary({ recentWindowDays: 3 }),
     ]);
-    status.value = health;
-    users.value = nextUsers;
-    groups.value = nextGroups;
-    ouTree.value = nextOuTree;
+    if (seq !== usersRequestSeq.value) return;
 
+    const items = Array.isArray(pagePayload?.items) ? pagePayload.items : [];
+    status.value = health;
+    users.value = items;
+    totalUsers.value = Number(pagePayload?.total || 0);
+    allUsersTotal.value = Number(summary?.total_users || 0);
+    recent3DaysLoginCount.value = Number(summary?.recent_login_users || 0);
+  } catch (e) {
+    if (seq !== usersRequestSeq.value) return;
+    error.value = e?.message || String(e);
+  } finally {
+    if (seq === usersRequestSeq.value) loading.value = false;
+  }
+}
+
+async function ensureGroupsLoaded(force = false) {
+  if (groupsLoaded.value && !force) return;
+  loadingGroups.value = true;
+  try {
+    groups.value = await apiListLdapGroups({ includeMembers: false, includeDescription: false });
+    groupsLoaded.value = true;
+  } finally {
+    loadingGroups.value = false;
+  }
+}
+
+async function ensureOuTreeLoaded(force = false) {
+  if (ouTreeLoaded.value && !force) return;
+  loadingOuTree.value = true;
+  try {
+    const nextOuTree = await apiListLdapOuTree({ includeUsers: false });
+    ouTree.value = nextOuTree;
+    ouTreeLoaded.value = true;
     const allDns = new Set(collectOuDns(nextOuTree));
     const nextExpanded = new Set();
     for (const dn of expandedOuDns.value) {
@@ -712,10 +742,30 @@ async function refreshAll() {
       nextExpanded.add(normalizeDn(root.dn));
     }
     expandedOuDns.value = nextExpanded;
+  } finally {
+    loadingOuTree.value = false;
+  }
+}
+
+async function toggleGroupDropdown() {
+  const next = !groupDropdownOpen.value;
+  groupDropdownOpen.value = next;
+  if (!next) return;
+  try {
+    await ensureGroupsLoaded();
   } catch (e) {
     error.value = e?.message || String(e);
-  } finally {
-    loading.value = false;
+  }
+}
+
+async function toggleOuDropdown() {
+  const next = !ouDropdownOpen.value;
+  ouDropdownOpen.value = next;
+  if (!next) return;
+  try {
+    await ensureOuTreeLoaded();
+  } catch (e) {
+    error.value = e?.message || String(e);
   }
 }
 
@@ -780,6 +830,21 @@ function onTableWheel(event) {
   event.preventDefault();
 }
 
+function scheduleRefresh(delayMs = 0) {
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+  if (delayMs <= 0) {
+    refreshAll();
+    return;
+  }
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null;
+    refreshAll();
+  }, delayMs);
+}
+
 onMounted(async () => {
   document.addEventListener("click", onClickOutside);
   await refreshAll();
@@ -790,10 +855,23 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener("click", onClickOutside);
   stopAutoScroll();
+  if (refreshTimer !== null) {
+    window.clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
 });
 
-watch([keyword, loginFrom, loginTo, selectedOuDn, selectedGroups, pageSize], () => {
-  currentPage.value = 1;
+watch([keyword, loginFrom, loginTo, selectedOuDns, selectedGroups, pageSize], () => {
+  if (currentPage.value !== 1) {
+    currentPage.value = 1;
+    return;
+  }
+  const delay = keyword.value.trim() ? 220 : 0;
+  scheduleRefresh(delay);
+});
+
+watch(currentPage, () => {
+  scheduleRefresh(0);
 });
 
 watch(totalPages, (next) => {
@@ -928,8 +1006,12 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   flex-wrap: wrap;
   margin-bottom: 12px;
 }
+.filters > * {
+  min-width: 0;
+}
 .search-input {
-  flex: 1 1 340px;
+  flex: 1 1 320px;
+  min-width: 260px;
   height: 36px;
   box-sizing: border-box;
   border: 1px solid #c9d8ec;
@@ -944,7 +1026,7 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
 }
 .datetime-input {
   height: 36px;
-  min-width: 210px;
+  min-width: 180px;
   box-sizing: border-box;
   border: 1px solid #c9d8ec;
   border-radius: 10px;
@@ -983,13 +1065,20 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
 .ou-filter-inline,
 .group-filter-inline {
   position: relative;
+  flex: 0 1 250px;
 }
 .ou-trigger-btn {
-  min-width: 240px;
+  width: 100%;
+  min-width: 180px;
+  max-width: 280px;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.group-filter-inline > .btn {
+  width: 100%;
+  min-width: 150px;
 }
 .ou-dropdown-panel,
 .group-dropdown-panel {
@@ -1004,6 +1093,11 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   display: grid;
   gap: 8px;
   z-index: 10;
+}
+.group-filter-inline .group-dropdown-panel {
+  left: auto;
+  right: 0;
+  width: min(420px, calc(100vw - 56px));
 }
 .ou-search-input,
 .group-search-input {
@@ -1047,6 +1141,11 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   cursor: pointer;
   color: #0f172a;
   min-width: 0;
+}
+.ou-row-check {
+  width: 14px;
+  height: 14px;
+  margin: 0 2px 0 0;
 }
 .ou-row-btn:hover {
   background: #f1f5f9;
@@ -1095,6 +1194,25 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   justify-content: flex-end;
   gap: 8px;
 }
+.ou-hit-summary {
+  display: grid;
+  gap: 6px;
+}
+.ou-hit-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ou-hit-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #f8fbff;
+  color: #334155;
+  font-size: 12px;
+}
 .group-checkbox-list {
   max-height: 240px;
   overflow: auto;
@@ -1113,12 +1231,16 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   background: #f8fafc;
 }
 .table-wrap {
+  position: relative;
   max-height: 62vh;
   overflow: auto;
   scrollbar-gutter: stable both-edges;
   border: 1px solid #d9e5f3;
   border-radius: 12px;
   background: #fff;
+}
+.table-wrap.loading {
+  pointer-events: none;
 }
 .table-wrap.autoscroll {
   overflow-y: hidden;
@@ -1307,6 +1429,8 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
     align-items: stretch;
   }
   .filters {
+    flex-wrap: wrap;
+    overflow-x: visible;
     align-items: stretch;
   }
   .search-input,
@@ -1327,6 +1451,10 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   .ou-dropdown-panel,
   .group-dropdown-panel {
     width: 100%;
+  }
+  .group-filter-inline .group-dropdown-panel {
+    left: 0;
+    right: auto;
   }
   .stats-grid {
     grid-template-columns: 1fr;

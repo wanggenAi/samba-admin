@@ -1,14 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "../auth/store";
 
-const Dashboard = () => import("../views/Dashboard.vue");
-const Users = () => import("../views/Users.vue");
-const UserCreate = () => import("../views/UserCreate.vue");
-const UserEdit = () => import("../views/UserEdit.vue");
-const OuManager = () => import("../views/OuManager.vue");
-const Login = () => import("../views/Login.vue");
-const SystemAdmin = () => import("../views/SystemAdmin.vue");
-const Forbidden = () => import("../views/Forbidden.vue");
+const Dashboard = () => import("../views/dashboard/DashboardView.vue");
+const Users = () => import("../views/users/UsersView.vue");
+const UserCreate = () => import("../views/users/UserCreateView.vue");
+const UserEdit = () => import("../views/users/UserEditView.vue");
+const OuManager = () => import("../views/ous/OuManagerView.vue");
+const Login = () => import("../views/auth/LoginPage.vue");
+const SystemAdmin = () => import("../views/system/SystemAdminView.vue");
+const Forbidden = () => import("../views/system/ForbiddenView.vue");
 
 const routes = [
   { path: "/", redirect: "/dashboard" },

@@ -82,11 +82,11 @@ async def import_users(
 @router.get("/export")
 def export_users(
     keyword: str | None = Query(default=None, description="keyword filter from user list search"),
-    ou_dn: str | None = Query(default=None, description="OU DN filter"),
+    ou_dn: list[str] = Query(default_factory=list, description="OU DN filters"),
     group_cn: list[str] | None = Query(default=None, description="group CN filters"),
     _: dict = Depends(require_permission("users.export")),
 ):
-    data = ldap_guard(lambda: export_users_csv(keyword=keyword, ou_dn=ou_dn, group_cns=group_cn or []))
+    data = ldap_guard(lambda: export_users_csv(keyword=keyword, ou_dns=ou_dn, group_cns=group_cn or []))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"users-export-{stamp}.csv"
     return StreamingResponse(

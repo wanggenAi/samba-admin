@@ -390,6 +390,7 @@ def _parent_dn(dn: str) -> str:
 def export_users_csv(
     keyword: str | None = None,
     ou_dn: str | None = None,
+    ou_dns: Optional[Iterable[str]] = None,
     group_cns: Optional[Iterable[str]] = None,
 ) -> bytes:
     svc = get_ldap_service()
@@ -408,12 +409,21 @@ def export_users_csv(
             groups_by_user.setdefault(key, set()).add(cn)
 
     filtered_users = users
-    target_ou = _normalize_dn(ou_dn or "")
-    if target_ou:
+    target_ous: set[str] = set()
+    for raw in ([ou_dn] if ou_dn is not None else []):
+        normalized = _normalize_dn(raw or "")
+        if normalized:
+            target_ous.add(normalized)
+    for raw in ou_dns or []:
+        normalized = _normalize_dn(raw or "")
+        if normalized:
+            target_ous.add(normalized)
+
+    if target_ous:
         filtered_users = [
             user
             for user in filtered_users
-            if _normalize_dn(_parent_dn(user.dn or "")) == target_ou
+            if _normalize_dn(_parent_dn(user.dn or "")) in target_ous
         ]
 
     normalized_group_cns = {

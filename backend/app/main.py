@@ -1,20 +1,37 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .core.logging_setup import configure_file_logging
+from .core.settings import settings
 from .routers import admin, auth, config, ldap, system, users, versions
 
 
 def create_app() -> FastAPI:
+    configure_file_logging(
+        log_dir=settings.log_dir,
+        file_name=settings.log_file_name,
+        level=settings.log_level,
+        max_bytes=settings.log_max_bytes,
+        backup_count=settings.log_backup_count,
+        retain_days=settings.log_retain_days,
+    )
+
     app = FastAPI(
         title="Samba Admin API (AD DC)",
         version="1.0.0",
     )
 
-    # CORS: allow frontend access during development (tighten in production)
+    cors_origins = settings.cors_origins or ["*"]
+    allow_credentials = settings.cors_allow_credentials
+    # Browsers reject credentials with wildcard origin.
+    if "*" in cors_origins and allow_credentials:
+        allow_credentials = False
+
+    # CORS: default permissive for development; configure in production.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
     )

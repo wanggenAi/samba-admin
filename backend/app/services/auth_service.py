@@ -191,6 +191,10 @@ class AuthService:
         return v
 
     @staticmethod
+    def _username_eq(a: str, b: str) -> bool:
+        return str(a or "").strip().lower() == str(b or "").strip().lower()
+
+    @staticmethod
     def _validate_role_name(name: str) -> str:
         v = name.strip()
         if not v:
@@ -464,7 +468,7 @@ class AuthService:
             role_map = self._resolve_role_map(data)
             users = data.get("users", [])
             for user in users:
-                if user.get("username") != name:
+                if not self._username_eq(user.get("username", ""), name):
                     continue
                 if roles is not None:
                     user["roles"] = self._validate_roles_exist(roles, role_map)
@@ -486,11 +490,12 @@ class AuthService:
             data = self._read()
             users = data.get("users", [])
             for idx, user in enumerate(users):
-                if user.get("username") != name:
+                if not self._username_eq(user.get("username", ""), name):
                     continue
+                deleted_name = str(user.get("username", "")).strip() or name
                 users.pop(idx)
                 self._write(data)
-                return {"ok": True, "deleted": name}
+                return {"ok": True, "deleted": deleted_name}
         raise HTTPException(status_code=404, detail="user not found")
 
     def authenticate(self, username: str, password: str) -> dict[str, Any]:
@@ -537,7 +542,7 @@ class AuthService:
         data = self._read()
         role_map = self._resolve_role_map(data)
         for user in data.get("users", []):
-            if user.get("username") != name:
+            if not self._username_eq(user.get("username", ""), name):
                 continue
             if bool(user.get("disabled", False)):
                 raise HTTPException(status_code=403, detail="user is disabled")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from ..core import settings
-from ..models.schema import ConfigModel
+from ..schemas.samba import ConfigModel
 
 
 def _samba_disabled() -> HTTPException:

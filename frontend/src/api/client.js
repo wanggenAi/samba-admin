@@ -1,6 +1,7 @@
 const ALLOWED_USER_VIEWS = new Set(["full", "list", "dashboard", "tree"]);
 
 let authTokenGetter = null;
+const inflightGetRequests = new Map();
 
 export function setAuthTokenGetter(getter) {
   authTokenGetter = typeof getter === "function" ? getter : null;
@@ -15,6 +16,9 @@ function getAuthToken() {
 }
 
 async function request(path, options = {}) {
+  const method = String(options?.method || "GET").trim().toUpperCase();
+  const dedupe = options?.dedupe !== false;
+  const useGetDedupe = dedupe && method === "GET" && !options?.body;
   const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
   const token = getAuthToken();
   const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
@@ -22,41 +26,62 @@ async function request(path, options = {}) {
     ? { ...authHeaders, ...(options.headers || {}) }
     : { "Content-Type": "application/json", ...authHeaders, ...(options.headers || {}) };
 
-  const res = await fetch(path, {
-    headers,
-    ...options,
-  });
+  const key = useGetDedupe ? `${method}:${path}|${token}` : "";
+  if (useGetDedupe) {
+    const pending = inflightGetRequests.get(key);
+    if (pending) return pending;
+  }
 
-  const contentType = (res.headers.get("content-type") || "").toLowerCase();
-  const isJson = contentType.includes("application/json");
+  const run = (async () => {
+    const res = await fetch(path, {
+      headers,
+      ...options,
+    });
 
-  let data = null;
-  if (isJson) {
-    try {
-      data = await res.json();
-    } catch {
-      data = null;
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    const isJson = contentType.includes("application/json");
+
+    let data = null;
+    if (isJson) {
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+    } else {
+      data = await res.text();
     }
-  } else {
-    data = await res.text();
+
+    if (!res.ok) {
+      const detail = data && data.detail;
+      const message =
+        (typeof detail === "string" && detail.trim() ? detail : null) ||
+        (detail && typeof detail === "object" ? JSON.stringify(detail) : null) ||
+        (typeof data === "string" && data.trim() ? data : null) ||
+        (data && typeof data === "object" ? JSON.stringify(data) : null) ||
+        `HTTP ${res.status}`;
+      const err = new Error(message);
+      err.status = res.status;
+      err.detail = detail;
+      err.data = data;
+      throw err;
+    }
+
+    return data;
+  })();
+
+  if (!useGetDedupe) {
+    return run;
   }
 
-  if (!res.ok) {
-    const detail = data && data.detail;
-    const message =
-      (typeof detail === "string" && detail.trim() ? detail : null) ||
-      (detail && typeof detail === "object" ? JSON.stringify(detail) : null) ||
-      (typeof data === "string" && data.trim() ? data : null) ||
-      (data && typeof data === "object" ? JSON.stringify(data) : null) ||
-      `HTTP ${res.status}`;
-    const err = new Error(message);
-    err.status = res.status;
-    err.detail = detail;
-    err.data = data;
-    throw err;
+  inflightGetRequests.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (inflightGetRequests.get(key) === run) {
+      inflightGetRequests.delete(key);
+    }
   }
-
-  return data;
 }
 
 export function apiLogin(payload) {
@@ -157,6 +182,11 @@ export function apiLdapHealth() {
   return request("/api/ldap/health");
 }
 
+export function apiLdapDashboardSummary(options = {}) {
+  const days = Math.min(90, Math.max(1, Number(options?.recentWindowDays || 3) || 3));
+  return request(`/api/ldap/dashboard-summary?recent_window_days=${days}`);
+}
+
 export function apiValidateConfig(payload) {
   return request("/api/config/validate", {
     method: "POST",
@@ -188,6 +218,44 @@ export function apiListLdapUsers(options = {}) {
   return request(path);
 }
 
+export function apiListLdapUsersPage(options = {}) {
+  const rawView = String(options?.view || "list").trim().toLowerCase();
+  const view = ALLOWED_USER_VIEWS.has(rawView) ? rawView : "list";
+  const page = Math.max(1, Number(options?.page || 1) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(options?.pageSize || 20) || 20));
+  const params = new URLSearchParams();
+  params.set("view", view);
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+
+  const keyword = String(options?.keyword || "").trim();
+  if (keyword) params.set("keyword", keyword);
+
+  const rawOuDns = Array.isArray(options?.ouDns)
+    ? options.ouDns
+    : [options?.ouDn];
+  for (const rawOuDn of rawOuDns) {
+    const ouDn = String(rawOuDn || "").trim();
+    if (ouDn) params.append("ou_dn", ouDn);
+  }
+  const ouScope = String(options?.ouScope || "").trim().toLowerCase();
+  if (ouScope === "subtree") params.set("ou_scope", "subtree");
+
+  for (const g of options?.groupCns || []) {
+    const cn = String(g || "").trim();
+    if (cn) params.append("group_cn", cn);
+  }
+
+  if (Number.isFinite(options?.loginFromMs) && options.loginFromMs > 0) {
+    params.set("login_from_ms", String(Math.floor(options.loginFromMs)));
+  }
+  if (Number.isFinite(options?.loginToMs) && options.loginToMs > 0) {
+    params.set("login_to_ms", String(Math.floor(options.loginToMs)));
+  }
+
+  return request(`/api/ldap/users-page?${params.toString()}`);
+}
+
 export function apiListLdapGroups(options = {}) {
   const includeMembers = options?.includeMembers !== false;
   const includeDescription = options?.includeDescription === true;
@@ -197,6 +265,16 @@ export function apiListLdapGroups(options = {}) {
   const query = params.toString();
   const path = query ? `/api/ldap/groups?${query}` : "/api/ldap/groups";
   return request(path);
+}
+
+export function apiListLdapUserGroups(username) {
+  const u = String(username || "").trim();
+  if (!u) return Promise.resolve([]);
+  return request(`/api/ldap/users/${encodeURIComponent(u)}/groups`);
+}
+
+export function apiListLdapUserGroupMap() {
+  return request("/api/ldap/user-group-map");
 }
 
 export function apiListLdapOuTree(options = {}) {
@@ -260,13 +338,16 @@ export function apiImportUsers(files, { defaultGroupCn = "Students", passwordLen
   });
 }
 
-export async function apiExportUsers({ keyword = "", ouDn = "", groupCns = [] } = {}) {
+export async function apiExportUsers({ keyword = "", ouDn = "", ouDns = [], groupCns = [] } = {}) {
   const params = new URLSearchParams();
   const kw = String(keyword || "").trim();
   if (kw) params.set("keyword", kw);
 
-  const ou = String(ouDn || "").trim();
-  if (ou) params.set("ou_dn", ou);
+  const rawOuDns = Array.isArray(ouDns) && ouDns.length ? ouDns : [ouDn];
+  for (const rawOuDn of rawOuDns) {
+    const ou = String(rawOuDn || "").trim();
+    if (ou) params.append("ou_dn", ou);
+  }
 
   for (const groupCn of groupCns || []) {
     const cn = String(groupCn || "").trim();

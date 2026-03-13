@@ -65,33 +65,36 @@
         </div>
       </div>
 
-      <div v-if="!ouTreeLines.length" class="muted mt">No OU nodes found under current base DN.</div>
-      <div v-else class="ou-tree-wrap mt">
-        <div
-          v-for="line in ouTreeLines"
-          :key="line.key"
-          class="ou-row"
-          :class="{
-            clickable: line.type === 'ou',
-            active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase(),
-          }"
-          :style="{ paddingLeft: `${line.depth * 18}px` }"
-          :title="line.dn"
-          @click="onTreeLineClick(line)"
-        >
-          <button
-            v-if="line.type === 'ou' && line.hasChildren"
-            type="button"
-            class="tree-toggle"
-            :aria-label="line.expanded ? 'Collapse OU' : 'Expand OU'"
-            @click.stop="onToggleOuExpand(line)"
+      <div class="tree-body-host mt" :class="{ loading: loadingOuTree }">
+        <div v-if="!ouTreeLines.length" class="muted mt">No OU nodes found under current base DN.</div>
+        <div v-else class="ou-tree-wrap mt">
+          <div
+            v-for="line in ouTreeLines"
+            :key="line.key"
+            class="ou-row"
+            :class="{
+              clickable: line.type === 'ou',
+              active: line.type === 'ou' && selectedOuDn && selectedOuDn.toLowerCase() === line.dn.toLowerCase(),
+            }"
+            :style="{ paddingLeft: `${line.depth * 18}px` }"
+            :title="line.dn"
+            @click="onTreeLineClick(line)"
           >
-            {{ line.expanded ? "▾" : "▸" }}
-          </button>
-          <span v-else class="tree-toggle-placeholder" aria-hidden="true"></span>
-          <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
-          <span class="main-text">{{ line.text }}</span>
+            <button
+              v-if="line.type === 'ou' && line.hasChildren"
+              type="button"
+              class="tree-toggle"
+              :aria-label="line.expanded ? 'Collapse OU' : 'Expand OU'"
+              @click.stop="onToggleOuExpand(line)"
+            >
+              {{ line.expanded ? "▾" : "▸" }}
+            </button>
+            <span v-else class="tree-toggle-placeholder" aria-hidden="true"></span>
+            <span class="tree-tag" :class="line.type">{{ line.type === "ou" ? "OU" : "User" }}</span>
+            <span class="main-text">{{ line.text }}</span>
+          </div>
         </div>
+        <DataLoadingOverlay :show="loadingOuTree" text="Loading OU tree..." />
       </div>
     </section>
 
@@ -144,8 +147,9 @@
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { apiCreateLdapOu, apiDeleteLdapOu, apiListLdapOuTree, apiRenameLdapOu } from "../api/client";
-import { useAuthStore } from "../auth/store";
+import DataLoadingOverlay from "../../components/DataLoadingOverlay.vue";
+import { apiCreateLdapOu, apiDeleteLdapOu, apiListLdapOuTree, apiRenameLdapOu } from "../../api/client";
+import { useAuthStore } from "../../auth/store";
 
 const auth = useAuthStore();
 const canCreateOu = computed(() => auth.hasPermission("ous.create"));
@@ -560,6 +564,13 @@ onMounted(async () => {
 }
 .create-ou-row .search-input {
   flex: 1;
+}
+.tree-body-host {
+  position: relative;
+  min-height: 120px;
+}
+.tree-body-host.loading {
+  pointer-events: none;
 }
 .ou-tree-wrap {
   border: 1px solid #e6edf4;

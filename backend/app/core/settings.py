@@ -26,6 +26,13 @@ def _bool(val: Optional[str], default: bool = False) -> bool:
     return default
 
 
+def _csv_list(val: Optional[str], default: list[str]) -> list[str]:
+    if val is None:
+        return list(default)
+    out = [item.strip() for item in val.split(",")]
+    return [item for item in out if item]
+
+
 class SambaSettings(BaseModel):
     # In AD DC mode, use samba-ad-dc service (not smbd)
     service_name: str = os.getenv("SAMBA_SERVICE", "samba-ad-dc")
@@ -116,6 +123,16 @@ class Settings(BaseModel):
     ldap: LdapSettings = LdapSettings()
     jwt_secret: str = os.getenv("APP_JWT_SECRET", "change-me-in-production")
     jwt_expire_minutes: int = int(os.getenv("APP_JWT_EXPIRE_MINUTES", "480"))
+    cors_origins: list[str] = _csv_list(os.getenv("APP_CORS_ORIGINS"), ["*"])
+    cors_allow_credentials: bool = _bool(os.getenv("APP_CORS_ALLOW_CREDENTIALS"), default=False)
+    log_dir: Path = Path(
+        os.getenv("APP_LOG_DIR", str(Path(__file__).resolve().parents[1] / "data" / "logs"))
+    )
+    log_file_name: str = os.getenv("APP_LOG_FILE", "backend.log")
+    log_level: str = os.getenv("APP_LOG_LEVEL", "INFO")
+    log_max_bytes: int = int(os.getenv("APP_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+    log_backup_count: int = int(os.getenv("APP_LOG_BACKUP_COUNT", "20"))
+    log_retain_days: int = int(os.getenv("APP_LOG_RETAIN_DAYS", "7"))
 
 
 settings = Settings()

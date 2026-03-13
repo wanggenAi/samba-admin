@@ -56,7 +56,7 @@
 
     <section class="panel">
       <h3>Users</h3>
-      <div class="table-wrap">
+      <div class="table-wrap" :class="{ loading: loading }">
         <table>
           <thead>
             <tr>
@@ -87,6 +87,7 @@
             </tr>
           </tbody>
         </table>
+        <DataLoadingOverlay :show="loading" text="Loading users..." />
       </div>
     </section>
 
@@ -110,7 +111,7 @@
         {{ savingPermission ? "Saving..." : "Create Permission" }}
       </button>
 
-      <div class="table-wrap mt-10">
+      <div class="table-wrap mt-10" :class="{ loading: loading }">
         <table>
           <thead>
             <tr>
@@ -132,6 +133,7 @@
             </tr>
           </tbody>
         </table>
+        <DataLoadingOverlay :show="loading" text="Loading permissions..." />
       </div>
     </section>
 
@@ -172,7 +174,7 @@
         {{ savingRole ? "Saving..." : "Create Role" }}
       </button>
 
-      <div class="table-wrap mt-10">
+      <div class="table-wrap mt-10" :class="{ loading: loading }">
         <table>
           <thead>
             <tr>
@@ -196,6 +198,7 @@
             </tr>
           </tbody>
         </table>
+        <DataLoadingOverlay :show="loading" text="Loading roles..." />
       </div>
     </section>
 
@@ -281,6 +284,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import DataLoadingOverlay from "../../components/DataLoadingOverlay.vue";
 import {
   apiCreateAdminPermission,
   apiCreateAdminRole,
@@ -294,8 +298,8 @@ import {
   apiUpdateAdminPermission,
   apiUpdateAdminRole,
   apiUpdateAdminUser,
-} from "../api/client";
-import { useAuthStore } from "../auth/store";
+} from "../../api/client";
+import { useAuthStore } from "../../auth/store";
 
 const auth = useAuthStore();
 const authUserName = computed(() => auth.user()?.username || "");
@@ -787,7 +791,11 @@ input:not([type]) {
   font-size: 12px;
 }
 .table-wrap {
+  position: relative;
   overflow: auto;
+}
+.table-wrap.loading {
+  pointer-events: none;
 }
 .mt-10 {
   margin-top: 10px;

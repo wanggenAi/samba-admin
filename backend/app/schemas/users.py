@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -16,6 +17,7 @@ class UserAddRequest(BaseModel):
     paid_flag: Optional[str] = None
     groups: list[str] = Field(default_factory=list)
     ou_path: list[str] = Field(default_factory=list)
+    sync_groups: bool = False
 
     @staticmethod
     def _strip_or_none(value: Optional[str]) -> Optional[str]:
@@ -76,11 +78,17 @@ class UserAddRequest(BaseModel):
     @field_validator("ou_path")
     @classmethod
     def _normalize_ou_path(cls, values: list[str]) -> list[str]:
+        if len(values) > 64:
+            raise ValueError("ou_path depth is too large")
         out: list[str] = []
         for raw in values:
             item = raw.strip()
-            if item:
-                out.append(item)
+            if not item:
+                continue
+            # UI/API must pass OU path segments only (single logical path), not raw DN fragments.
+            if re.search(r"(?i)\b(ou|dc|cn)\s*=", item):
+                raise ValueError("ou_path must be OU path segments, not DN fragments")
+            out.append(item)
         return out
 
 
@@ -93,6 +101,7 @@ class UserAddResponse(BaseModel):
     moved_to_dn: Optional[str] = None
     updated_attributes: list[str] = Field(default_factory=list)
     groups_added: list[str] = Field(default_factory=list)
+    groups_removed: list[str] = Field(default_factory=list)
 
 
 class UserDeleteResponse(BaseModel):

@@ -127,6 +127,52 @@ def _add_user_groups(
     return groups_added
 
 
+def _sync_user_groups(
+    svc: LdapService,
+    conn: ldap3.Connection,
+    user_dn: str,
+    groups: list[str],
+) -> tuple[list[str], list[str]]:
+    desired_dns: dict[str, str] = {}
+    desired_cns_by_dn: dict[str, str] = {}
+    for group_cn in groups:
+        group_dn = svc.find_group_dn(conn, group_cn)
+        if not group_dn:
+            raise HTTPException(status_code=400, detail=f"group not found: {group_cn}")
+        key = group_dn.lower()
+        desired_dns[key] = group_dn
+        desired_cns_by_dn[key] = group_cn
+
+    current_groups = svc.list_user_groups(conn, user_dn)
+    current_dns: dict[str, str] = {}
+    current_cns_by_dn: dict[str, str] = {}
+    for item in current_groups:
+        dn = str(item.dn or "").strip()
+        if not dn:
+            continue
+        key = dn.lower()
+        current_dns[key] = dn
+        current_cns_by_dn[key] = str(item.cn or "").strip() or dn
+
+    groups_added: list[str] = []
+    for key, dn in desired_dns.items():
+        if key in current_dns:
+            continue
+        svc.add_user_to_group(conn, user_dn, dn)
+        groups_added.append(desired_cns_by_dn.get(key, dn))
+
+    groups_removed: list[str] = []
+    for key, dn in current_dns.items():
+        if key in desired_dns:
+            continue
+        svc.remove_user_from_group(conn, user_dn, dn)
+        groups_removed.append(current_cns_by_dn.get(key, dn))
+
+    groups_added.sort(key=lambda x: x.lower())
+    groups_removed.sort(key=lambda x: x.lower())
+    return groups_added, groups_removed
+
+
 def add_or_overwrite_user(payload: UserAddRequest) -> UserAddResponse:
     svc = get_ldap_service()
     with svc.connection() as conn:
@@ -211,7 +257,12 @@ def add_or_overwrite_user(payload: UserAddRequest) -> UserAddResponse:
         )
         updated_attributes = renamed_attributes + profile_updated_attributes
 
-        groups_added = _add_user_groups(svc, conn, user_dn, payload.groups)
+        groups_added: list[str] = []
+        groups_removed: list[str] = []
+        if payload.sync_groups and not created:
+            groups_added, groups_removed = _sync_user_groups(svc, conn, user_dn, payload.groups)
+        else:
+            groups_added = _add_user_groups(svc, conn, user_dn, payload.groups)
 
         return UserAddResponse(
             username=active_username,
@@ -221,4 +272,5 @@ def add_or_overwrite_user(payload: UserAddRequest) -> UserAddResponse:
             moved_to_dn=(user_dn if moved else None),
             updated_attributes=updated_attributes,
             groups_added=groups_added,
+            groups_removed=groups_removed,
         )

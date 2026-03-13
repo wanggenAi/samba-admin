@@ -10,7 +10,7 @@ from ldap3.core.exceptions import LDAPException
 from pydantic import BaseModel, Field
 
 from app.core.settings import settings
-from app.models.schema import LdapGroup, LdapUser, GroupTreeNode, OuTreeNode
+from app.schemas.ldap import GroupTreeNode, LdapGroup, LdapUser, OuTreeNode
 from app.routers.authz import require_permission
 from app.routers import ldap_guard
 from app.services import get_ldap_service
@@ -89,6 +89,27 @@ class OuRenameResponse(BaseModel):
     new_dn: str
 
 
+class UserGroupMapItem(BaseModel):
+    user_dn: str
+    groups: List[str] = Field(default_factory=list)
+
+
+class LdapUserPageItem(LdapUser):
+    groups: List[str] = Field(default_factory=list)
+
+
+class LdapUsersPageResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: List[LdapUserPageItem] = Field(default_factory=list)
+
+
+class LdapDashboardSummaryResponse(BaseModel):
+    total_users: int
+    recent_login_users: int
+
+
 @router.get("/health")
 def health(_: dict = Depends(require_permission("dashboard.view"))):
     def _run():
@@ -120,6 +141,33 @@ def list_groups(
     )
 
 
+@router.get("/users/{username}/groups", response_model=List[LdapGroup], response_model_exclude_none=True, response_model_exclude_defaults=True)
+def list_user_groups(
+    username: str,
+    _: dict = Depends(require_permission("users.view")),
+):
+    def _list(svc: LdapService, conn: Connection) -> List[LdapGroup]:
+        user_dn = svc.find_user_dn(conn, username.strip())
+        if not user_dn:
+            raise HTTPException(status_code=404, detail=f"user not found: {username}")
+        groups = svc.list_user_groups(conn, user_dn=user_dn)
+        groups.sort(key=lambda g: (g.cn or "").lower())
+        return groups
+
+    return _with_ldap_connection(_list)
+
+
+@router.get("/user-group-map", response_model=List[UserGroupMapItem], response_model_exclude_none=True)
+def user_group_map(_: dict = Depends(require_permission("users.view"))):
+    def _run() -> List[UserGroupMapItem]:
+        mapping = get_ldap_service().build_user_group_map()
+        items = [UserGroupMapItem(user_dn=dn, groups=groups) for dn, groups in mapping.items()]
+        items.sort(key=lambda x: x.user_dn)
+        return items
+
+    return ldap_guard(_run)
+
+
 @router.get("/users", response_model=List[LdapUser], response_model_exclude_none=True)
 def list_users(
     view: Literal["full", "list", "dashboard", "tree"] = Query(
@@ -129,6 +177,46 @@ def list_users(
     _: dict = Depends(require_permission("users.view")),
 ):
     return ldap_guard(lambda: get_ldap_service().list_users(view=view))
+
+
+@router.get("/users-page", response_model=LdapUsersPageResponse, response_model_exclude_none=True)
+def list_users_page(
+    view: Literal["full", "list", "dashboard", "tree"] = Query(default="list"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    keyword: Optional[str] = Query(default=None),
+    ou_dn: List[str] = Query(default_factory=list),
+    ou_scope: Literal["direct", "subtree"] = Query(default="direct"),
+    group_cn: List[str] = Query(default_factory=list),
+    login_from_ms: Optional[int] = Query(default=None, ge=0),
+    login_to_ms: Optional[int] = Query(default=None, ge=0),
+    _: dict = Depends(require_permission("users.view")),
+):
+    payload = ldap_guard(
+        lambda: get_ldap_service().list_users_page(
+            view=view,
+            page=page,
+            page_size=page_size,
+            keyword=keyword,
+            ou_dns=ou_dn,
+            ou_scope=ou_scope,
+            group_cns=group_cn,
+            login_from_ms=login_from_ms,
+            login_to_ms=login_to_ms,
+        )
+    )
+    return LdapUsersPageResponse(**payload)
+
+
+@router.get("/dashboard-summary", response_model=LdapDashboardSummaryResponse)
+def dashboard_summary(
+    recent_window_days: int = Query(default=3, ge=1, le=90),
+    _: dict = Depends(require_permission("dashboard.view")),
+):
+    payload = ldap_guard(
+        lambda: get_ldap_service().dashboard_summary(recent_window_days=recent_window_days)
+    )
+    return LdapDashboardSummaryResponse(**payload)
 
 
 @router.get("/tree", response_model=List[GroupTreeNode])
