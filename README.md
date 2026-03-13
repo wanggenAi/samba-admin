@@ -6,6 +6,13 @@ LDAP-first web console for AD/Samba environments.
 
 This repository currently runs in **LDAP-only mode** for user and OU management.
 
+Built-in local auth is enabled:
+- JWT bearer token authentication
+- Local file storage RBAC (`backend/app/data/rbac.json`)
+- Initial super admin account auto-created on first run
+  - username: `admin`
+  - password: `admin123` (change in System Management after first login)
+
 - Fully available:
   - LDAP health check
   - User list/search/filter/delete
@@ -67,6 +74,15 @@ Browser (Vue 3 + Vite)
   - if OU not empty, prompts for recursive delete
 - Tree includes OU and user nodes for context
 
+### System management (`/system-admin`)
+- Local RBAC management UI (users, roles, permissions)
+- Create/edit/delete local auth users
+- Create/edit/delete custom roles
+- Create/edit/delete custom permissions
+- Built-in roles/permissions are marked as **System** and protected
+- Field-level validation and fixed-position success/error toast
+- Stale role/permission selections are auto-cleaned after list refresh
+
 ## OU path input rules
 
 Used in user create/edit and documented in OU Manager:
@@ -96,6 +112,7 @@ See template: `backend/.env.example`
 Important:
 - `LDAP_BIND_PASSWORD` must be set, otherwise LDAP APIs return `400`.
 - `LDAP_USE_SSL=true` and `LDAP_START_TLS=true` are mutually exclusive; SSL wins.
+- Set `APP_JWT_SECRET` for production deployments.
 
 Run backend:
 
@@ -114,6 +131,14 @@ curl http://127.0.0.1:8000/api/ldap/health
 
 OpenAPI docs:
 - `http://127.0.0.1:8000/docs`
+
+Login:
+- Open frontend `/login`
+- Initial local admin: `admin / admin123`
+
+RBAC data migration:
+- Keep `backend/app/data/rbac.json` when moving servers
+- Keep the same `APP_JWT_SECRET` if you want existing JWTs to remain valid
 
 ## Frontend setup
 
@@ -196,6 +221,10 @@ LDAP_BASE_DN=DC=evms,DC=bstu,DC=edu
 # SAMBA_CONF=/etc/samba/smb.conf
 # SAMBA_TESTPARM=testparm
 # ALLOW_APPLY=false
+
+# App auth/JWT settings (must be changed in production)
+APP_JWT_SECRET=change-me-in-production
+APP_JWT_EXPIRE_MINUTES=480
 EOF
 sudo chmod 600 /etc/samba-admin/backend.env
 ```
@@ -313,6 +342,23 @@ sudo systemctl restart samba-admin-frontend.service
 ```
 
 ## API quick reference
+
+### Auth and RBAC
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `POST /api/auth/change-password`
+- `GET /api/admin/permissions` (requires `system.manage`)
+- `POST /api/admin/permissions` (requires `system.manage`)
+- `PATCH /api/admin/permissions/{name}` (requires `system.manage`)
+- `DELETE /api/admin/permissions/{name}` (requires `system.manage`)
+- `GET /api/admin/roles` (requires `system.manage`)
+- `POST /api/admin/roles` (requires `system.manage`)
+- `PATCH /api/admin/roles/{name}` (requires `system.manage`)
+- `DELETE /api/admin/roles/{name}` (requires `system.manage`)
+- `GET /api/admin/users` (requires `system.manage`)
+- `POST /api/admin/users` (requires `system.manage`)
+- `PATCH /api/admin/users/{username}` (requires `system.manage`)
+- `DELETE /api/admin/users/{username}` (requires `system.manage`)
 
 ### Health and LDAP
 - `GET /health`

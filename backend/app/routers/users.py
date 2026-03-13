@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import io
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
+from ..routers.authz import require_any_permission, require_permission
 from ..routers import ldap_guard
 from ..schemas.users import UserAddRequest, UserAddResponse, UserDeleteResponse, UserImportResponse
 from ..services.users import (
@@ -38,12 +39,12 @@ async def _read_upload_with_limit(upload: UploadFile, max_size: int) -> bytes:
 
 
 @router.post("", response_model=UserAddResponse)
-def add_user(payload: UserAddRequest):
+def add_user(payload: UserAddRequest, _: dict = Depends(require_any_permission("users.create", "users.edit"))):
     return ldap_guard(lambda: add_or_overwrite_user(payload))
 
 
 @router.delete("/{username}", response_model=UserDeleteResponse)
-def delete_user(username: str):
+def delete_user(username: str, _: dict = Depends(require_permission("users.delete"))):
     return ldap_guard(lambda: delete_user_by_username(username))
 
 
@@ -52,6 +53,7 @@ async def import_users(
     files: list[UploadFile] = File(..., description="one or more legacy txt files"),
     default_group_cn: str | None = Form(default="Students"),
     password_length: int = Form(default=12),
+    _: dict = Depends(require_permission("users.import")),
 ):
     loaded_files: list[tuple[str, bytes]] = []
     total_size = 0
@@ -82,6 +84,7 @@ def export_users(
     keyword: str | None = Query(default=None, description="keyword filter from user list search"),
     ou_dn: str | None = Query(default=None, description="OU DN filter"),
     group_cn: list[str] | None = Query(default=None, description="group CN filters"),
+    _: dict = Depends(require_permission("users.export")),
 ):
     data = ldap_guard(lambda: export_users_csv(keyword=keyword, ou_dn=ou_dn, group_cns=group_cn or []))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")

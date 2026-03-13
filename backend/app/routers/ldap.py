@@ -4,13 +4,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import List, Literal, Optional, TypeVar
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPException
 from pydantic import BaseModel, Field
 
 from app.core.settings import settings
 from app.models.schema import LdapGroup, LdapUser, GroupTreeNode, OuTreeNode
+from app.routers.authz import require_permission
 from app.routers import ldap_guard
 from app.services import get_ldap_service
 from app.services.ldap_service import LdapService
@@ -89,7 +90,7 @@ class OuRenameResponse(BaseModel):
 
 
 @router.get("/health")
-def health():
+def health(_: dict = Depends(require_permission("dashboard.view"))):
     def _run():
         svc = get_ldap_service()
         svc.ping()
@@ -109,6 +110,7 @@ def health():
 def list_groups(
     include_members: bool = Query(default=True, description="include group member DN list"),
     include_description: bool = Query(default=True, description="include group description"),
+    _: dict = Depends(require_permission("users.view")),
 ):
     return ldap_guard(
         lambda: get_ldap_service().list_groups(
@@ -124,12 +126,16 @@ def list_users(
         default="full",
         description="field set profile for user payload size",
     ),
+    _: dict = Depends(require_permission("users.view")),
 ):
     return ldap_guard(lambda: get_ldap_service().list_users(view=view))
 
 
 @router.get("/tree", response_model=List[GroupTreeNode])
-def group_tree(root_group: Optional[str] = Query(default=None, description="optional root group cn")):
+def group_tree(
+    root_group: Optional[str] = Query(default=None, description="optional root group cn"),
+    _: dict = Depends(require_permission("users.view")),
+):
     return ldap_guard(lambda: get_ldap_service().build_group_tree(root_group_cn=root_group))
 
 
@@ -140,12 +146,13 @@ def ou_tree(
         default="full",
         description="user field profile when include_users=true",
     ),
+    _: dict = Depends(require_permission("ous.view")),
 ):
     return ldap_guard(lambda: get_ldap_service().build_ou_tree(include_users=include_users, user_view=user_view))
 
 
 @router.post("/ou", response_model=OuCreateResponse)
-def create_ou(payload: OuCreateRequest):
+def create_ou(payload: OuCreateRequest, _: dict = Depends(require_permission("ous.create"))):
     def _create(svc: LdapService, conn: Connection) -> OuCreateResponse:
         try:
             dn, created = svc.create_ou(conn, name=payload.name, parent_dn=payload.parent_dn)
@@ -160,6 +167,7 @@ def create_ou(payload: OuCreateRequest):
 def delete_ou(
     dn: str = Query(..., description="OU DN to delete"),
     recursive: bool = Query(default=False, description="delete subtree recursively"),
+    _: dict = Depends(require_permission("ous.delete")),
 ):
     def _delete(svc: LdapService, conn: Connection) -> OuDeleteResponse:
         try:
@@ -172,7 +180,7 @@ def delete_ou(
 
 
 @router.patch("/ou", response_model=OuRenameResponse)
-def rename_ou(payload: OuRenameRequest):
+def rename_ou(payload: OuRenameRequest, _: dict = Depends(require_permission("ous.rename"))):
     def _rename(svc: LdapService, conn: Connection) -> OuRenameResponse:
         try:
             new_dn = svc.rename_ou(conn, ou_dn=payload.dn, new_name=payload.new_name)

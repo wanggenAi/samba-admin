@@ -26,6 +26,10 @@ npm run dev
 Default URL: `http://127.0.0.1:5173`  
 Default API target: `http://127.0.0.1:8000` (from `vite.config.js` fallback)
 
+Default first login (created by backend automatically):
+- username: `admin`
+- password: `admin123`
+
 ## Build and Preview
 
 ```bash
@@ -44,4 +48,5 @@ Note:
 - `/users/new`: create user
 - `/users/edit/:username`: edit user
 - `/ous`: OU tree operations
-- `/config`, `/versions`: placeholder pages in current LDAP-only mode
+- `/system-admin`: local RBAC users/roles/permissions management (requires `system.manage`)
+- `/config`, `/versions`: hidden from navbar in current UX (routes redirect to dashboard)

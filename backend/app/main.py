@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import system, config, versions, ldap, users
+from .routers import admin, auth, config, ldap, system, users, versions
 
 
 def create_app() -> FastAPI:
@@ -20,6 +20,8 @@ def create_app() -> FastAPI:
     )
 
     # Routers
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
     app.include_router(system.router, prefix="/api/system", tags=["system"])
     app.include_router(config.router, prefix="/api/config", tags=["config"])
     app.include_router(versions.router, prefix="/api/versions", tags=["versions"])

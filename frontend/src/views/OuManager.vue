@@ -25,8 +25,8 @@
           </button>
           <button class="btn" :disabled="loadingOuTree || !ouTree.length" @click="onExpandAllOu">+All</button>
           <button class="btn" :disabled="loadingOuTree || !ouTree.length" @click="onCollapseAllOu">-All</button>
-          <button class="btn" :disabled="loadingOuTree || ouOpLoading || !selectedOuDn" @click="openRenameModal">Edit OU</button>
-          <button class="btn danger" :disabled="loadingOuTree || ouOpLoading || !selectedOuDn" @click="onDeleteOu">Del OU</button>
+          <button v-if="canRenameOu" class="btn" :disabled="loadingOuTree || ouOpLoading || !selectedOuDn" @click="openRenameModal">Edit OU</button>
+          <button v-if="canDeleteOu" class="btn danger" :disabled="loadingOuTree || ouOpLoading || !selectedOuDn" @click="onDeleteOu">Del OU</button>
         </div>
       </div>
 
@@ -37,7 +37,7 @@
         placeholder="Search OU / user / DN"
       />
 
-      <div class="create-ou-box mt">
+      <div v-if="canCreateOu" class="create-ou-box mt">
         <div class="create-ou-title">Create OU</div>
         <div class="create-ou-hint compact">
           Select parent in tree, then input one OU name (e.g. <code>63/24</code> or <code>ms</code>).
@@ -145,6 +145,12 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
 import { apiCreateLdapOu, apiDeleteLdapOu, apiListLdapOuTree, apiRenameLdapOu } from "../api/client";
+import { useAuthStore } from "../auth/store";
+
+const auth = useAuthStore();
+const canCreateOu = computed(() => auth.hasPermission("ous.create"));
+const canRenameOu = computed(() => auth.hasPermission("ous.rename"));
+const canDeleteOu = computed(() => auth.hasPermission("ous.delete"));
 
 const ouTree = ref([]);
 const loadingOuTree = ref(false);
@@ -303,6 +309,7 @@ async function onRefreshTree() {
 }
 
 async function onCreateOu() {
+  if (!canCreateOu.value) return;
   const name = String(newOuName.value || "").trim();
   if (!name) return;
 
@@ -323,6 +330,7 @@ async function onCreateOu() {
 }
 
 function openRenameModal() {
+  if (!canRenameOu.value) return;
   const dn = selectedOuDn.value;
   if (!dn) return;
   const currentName = ouNameFromDn(dn);
@@ -341,6 +349,7 @@ function closeRenameModal() {
 }
 
 async function submitRenameOu() {
+  if (!canRenameOu.value) return;
   const dn = renameSourceDn.value;
   const currentName = renameCurrentName.value;
   const nextName = String(renameNextName.value || "").trim();
@@ -363,6 +372,7 @@ async function submitRenameOu() {
 }
 
 async function onDeleteOu() {
+  if (!canDeleteOu.value) return;
   const dn = selectedOuDn.value;
   if (!dn) return;
   const ouName = ouNameFromDn(dn);

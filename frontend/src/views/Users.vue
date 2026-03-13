@@ -15,6 +15,7 @@
           @change="onImportFiles"
         />
         <button
+          v-if="canImport"
           class="btn"
           type="button"
           :disabled="importing"
@@ -35,10 +36,10 @@
             TXT only. Max {{ importLimitPerFileText }} per file, max {{ importLimitTotalText }} total.
           </span>
         </span>
-        <button class="btn" type="button" :disabled="exporting" @click="onExportUsers">
+        <button v-if="canExport" class="btn" type="button" :disabled="exporting" @click="onExportUsers">
           {{ exporting ? "Exporting..." : "Export CSV" }}
         </button>
-        <button class="btn primary" type="button" @click="openAddWindow">New User</button>
+        <button v-if="canCreateUser" class="btn primary" type="button" @click="openAddWindow">New User</button>
       </div>
     </header>
 
@@ -174,6 +175,7 @@
           </div>
           <div class="panel-actions list-actions">
             <button
+              v-if="canDeleteUser"
               class="btn danger"
               :disabled="!selectedUsernames.length || deletingBatch"
               @click="onBatchDelete"
@@ -289,6 +291,7 @@
                 <td class="dn mono" :title="u.dn">{{ u.dn }}</td>
                 <td>
                   <button
+                    v-if="canEditUser"
                     class="btn"
                     type="button"
                     @click.stop="openEditWindow(u)"
@@ -335,6 +338,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import { useAuthStore } from "../auth/store";
 import {
   apiDeleteUser,
   apiExportUsers,
@@ -343,6 +347,13 @@ import {
   apiListLdapOuTree,
   apiListLdapUsers,
 } from "../api/client";
+
+const auth = useAuthStore();
+const canCreateUser = computed(() => auth.hasPermission("users.create"));
+const canEditUser = computed(() => auth.hasPermission("users.edit"));
+const canDeleteUser = computed(() => auth.hasPermission("users.delete"));
+const canImport = computed(() => auth.hasPermission("users.import"));
+const canExport = computed(() => auth.hasPermission("users.export"));
 
 const users = shallowRef([]);
 const groups = shallowRef([]);
@@ -633,6 +644,7 @@ function clearGroupFilters() {
 }
 
 function triggerImport() {
+  if (!canImport.value) return;
   importInputRef.value?.click();
 }
 
@@ -666,6 +678,7 @@ function _downloadBlob(blob, filename) {
 }
 
 async function onExportUsers() {
+  if (!canExport.value) return;
   exporting.value = true;
   error.value = "";
   actionMessage.value = "";
@@ -731,10 +744,12 @@ async function onImportFiles(event) {
 }
 
 function openAddWindow() {
+  if (!canCreateUser.value) return;
   window.open("/users/new", "_blank", "noopener,noreferrer");
 }
 
 function openEditWindow(user) {
+  if (!canEditUser.value) return;
   const username = resolveUsername(user);
   if (!username) return;
   window.open(`/users/edit/${encodeURIComponent(username)}`, "_blank", "noopener,noreferrer");
@@ -816,6 +831,7 @@ function toggleSelectCurrentPage(checked) {
 }
 
 async function onBatchDelete() {
+  if (!canDeleteUser.value) return;
   const targets = [...selectedUsernames.value];
   if (!targets.length) return;
   const ok = window.confirm(`Delete ${targets.length} selected users? This cannot be undone.`);

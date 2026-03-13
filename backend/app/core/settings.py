@@ -114,6 +114,8 @@ class LdapSettings(BaseModel):
 class Settings(BaseModel):
     samba: SambaSettings = SambaSettings()
     ldap: LdapSettings = LdapSettings()
+    jwt_secret: str = os.getenv("APP_JWT_SECRET", "change-me-in-production")
+    jwt_expire_minutes: int = int(os.getenv("APP_JWT_EXPIRE_MINUTES", "480"))
 
 
 settings = Settings()

@@ -19,6 +19,7 @@ venv/
 # ========================
 backend/data/versions/*
 backend/data/model.json
+backend/app/data/rbac.json
 
 # ========================
 # Node / Frontend
