@@ -28,6 +28,29 @@ class UserSchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             UserAddRequest(**payload)
 
+    def test_rejects_invalid_paid_flag_and_too_deep_ou(self):
+        payload = self._base_payload()
+        payload["paid_flag"] = "X"
+        with self.assertRaises(ValidationError):
+            UserAddRequest(**payload)
+
+        payload = self._base_payload()
+        payload["ou_path"] = ["x"] * 65
+        with self.assertRaises(ValidationError):
+            UserAddRequest(**payload)
+
+    def test_normalizes_groups_and_optional_fields(self):
+        payload = self._base_payload()
+        payload["groups"] = [" Students ", "students", "", "VPN"]
+        payload["username"] = "  user1  "
+        payload["display_name"] = "  "
+        payload["password"] = "   P@ss   "
+        model = UserAddRequest(**payload)
+        self.assertEqual(model.username, "user1")
+        self.assertIsNone(model.display_name)
+        self.assertEqual(model.password, "P@ss")
+        self.assertEqual(model.groups, ["Students", "VPN"])
+
 
 if __name__ == "__main__":
     unittest.main()

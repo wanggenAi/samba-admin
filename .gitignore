@@ -2,14 +2,23 @@
 # Python
 # ========================
 __pycache__/
+.pycache/
 *.pyc
 *.pyo
 *.pyd
 *.sqlite3
 *.log
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 .env
 .venv/
 venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.python-version
 
 # macOS
 .DS_Store
@@ -32,3 +41,4 @@ frontend/node_modules/
 # VSCode
 # ========================
 .vscode/
+.idea/

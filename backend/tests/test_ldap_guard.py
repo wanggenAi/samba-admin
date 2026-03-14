@@ -21,6 +21,17 @@ class LdapGuardTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 500)
         self.assertIn("bind failed", str(ctx.exception.detail))
 
+    def test_passthrough_http_exception(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            ldap_guard(lambda: (_ for _ in ()).throw(HTTPException(status_code=418, detail="teapot")))
+        self.assertEqual(ctx.exception.status_code, 418)
+
+    def test_maps_unhandled_exception_to_500(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            ldap_guard(lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        self.assertEqual(ctx.exception.status_code, 500)
+        self.assertEqual(ctx.exception.detail, "internal server error")
+
 
 if __name__ == "__main__":
     unittest.main()

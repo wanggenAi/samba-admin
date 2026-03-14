@@ -163,12 +163,55 @@ source .venv/bin/activate
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
+Backend lint:
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check app tests
+```
+
+Backend coverage (default fail-under `80`, configurable):
+
+```bash
+cd backend
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+COVERAGE_THRESHOLD=80 coverage run -m unittest discover -s tests -p 'test_*.py'
+coverage report -m --fail-under="${COVERAGE_THRESHOLD:-80}"
+```
+
 Frontend build validation:
 
 ```bash
 cd frontend
 npm run build
 ```
+
+GitHub CI:
+- Workflow file: `.github/workflows/backend-ci.yml`
+- Stages: `lint -> test -> coverage`
+- Coverage threshold priority: manual dispatch input `coverage_threshold` > repo variable `COVERAGE_THRESHOLD` > default `80`
+- Default threshold: `80`
+
+Disable CI stages:
+- Manual run (`workflow_dispatch`): set inputs `run_lint=false`, `run_tests=false`, or `run_coverage=false`.
+- Repo-level (all push/PR): set GitHub Actions Variables
+  - `ENABLE_LINT=false`
+  - `ENABLE_TESTS=false`
+  - `ENABLE_COVERAGE=false`
+
+Repo cleanliness (recommended):
+- Ignore local-only files and caches via `.gitignore` (see section below).
+- If a file was tracked before being ignored, untrack it once:
+
+```bash
+git rm --cached .python-version
+git rm --cached -r backend/.ruff_cache backend/**/__pycache__ 2>/dev/null || true
+```
+
+Then commit the `.gitignore` update.
 
 ## 12. Default Local Admin
 
