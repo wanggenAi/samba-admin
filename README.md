@@ -202,6 +202,25 @@ Disable CI stages:
   - `ENABLE_TESTS=false`
   - `ENABLE_COVERAGE=false`
 
+Recommended CI-based development workflow:
+1. Sync `main` first, then create a feature branch (avoid direct commits to `main`).
+2. Implement changes on the feature branch.
+3. Run local checks before pushing:
+
+```bash
+cd backend
+source .venv/bin/activate
+ruff check app tests
+python -m unittest discover -s tests -p 'test_*.py'
+coverage run -m unittest discover -s tests -p 'test_*.py'
+coverage report -m --fail-under=80
+```
+
+4. Push branch and open a Pull Request to `main`.
+5. Wait for GitHub Actions (`lint -> test -> coverage`) to pass.
+6. Merge into `main` only after all required CI checks are green.
+7. Optionally delete merged feature branch to keep repository clean.
+
 Repo cleanliness (recommended):
 - Ignore local-only files and caches via `.gitignore` (see section below).
 - If a file was tracked before being ignored, untrack it once:
