@@ -201,6 +201,7 @@ Disable CI stages:
   - `ENABLE_LINT=false`
   - `ENABLE_TESTS=false`
   - `ENABLE_COVERAGE=false`
+  - `COVERAGE_THRESHOLD=80`
 
 Recommended CI-based development workflow:
 1. Sync `main` first, then create a feature branch (avoid direct commits to `main`).
