@@ -208,6 +208,7 @@ Repo cleanliness (recommended):
 
 ```bash
 git rm --cached .python-version
+git rm --cached backend/app/data/rbac.json
 git rm --cached -r backend/.ruff_cache backend/**/__pycache__ 2>/dev/null || true
 ```
 
