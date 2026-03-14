@@ -28,7 +28,7 @@ venv/
 # ========================
 backend/app/data/logs/*
 backend/app/data/versions/*
-backend/app/data/rbac.json
+**/rbac.json
 
 # ========================
 # Node / Frontend
