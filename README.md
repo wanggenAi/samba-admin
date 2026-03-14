@@ -178,8 +178,9 @@ Backend coverage (default fail-under `80`, configurable):
 cd backend
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
-COVERAGE_THRESHOLD=80 coverage run -m unittest discover -s tests -p 'test_*.py'
-coverage report -m --fail-under="${COVERAGE_THRESHOLD:-80}"
+export COVERAGE_THRESHOLD=80
+coverage run -m unittest discover -s tests -p 'test_*.py'
+coverage report -m --fail-under="$COVERAGE_THRESHOLD"
 ```
 
 Frontend build validation:
@@ -192,8 +193,9 @@ npm run build
 GitHub CI:
 - Workflow file: `.github/workflows/backend-ci.yml`
 - Stages: `lint -> test -> coverage`
-- Coverage threshold priority: manual dispatch input `coverage_threshold` > repo variable `COVERAGE_THRESHOLD` > default `80`
-- Default threshold: `80`
+- Coverage threshold:
+  - `push` / `pull_request`: repo variable `COVERAGE_THRESHOLD` (fallback: `80`)
+  - `workflow_dispatch`: input `coverage_threshold` is used (default input value: `80`)
 
 Disable CI stages:
 - Manual run (`workflow_dispatch`): set inputs `run_lint=false`, `run_tests=false`, or `run_coverage=false`.
@@ -201,7 +203,6 @@ Disable CI stages:
   - `ENABLE_LINT=false`
   - `ENABLE_TESTS=false`
   - `ENABLE_COVERAGE=false`
-  - `COVERAGE_THRESHOLD=80`
 
 Recommended CI-based development workflow:
 1. Sync `main` first, then create a feature branch (avoid direct commits to `main`).
