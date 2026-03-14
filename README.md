@@ -110,6 +110,12 @@ npm run build
 npm run preview
 ```
 
+## Docker Deployment
+
+If you want to run this project using Docker, see:
+
+`docs/docker.md`
+
 ## 7. Key Runtime Files
 
 - RBAC store: `backend/app/data/rbac.json`
