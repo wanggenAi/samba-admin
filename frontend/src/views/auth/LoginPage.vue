@@ -32,11 +32,10 @@
 
 <script setup>
 import { ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute } from "vue-router";
 import { useAuthStore } from "../../auth/store";
 
 const route = useRoute();
-const router = useRouter();
 const auth = useAuthStore();
 
 const username = ref("");
@@ -50,8 +49,9 @@ async function submit() {
   error.value = "";
   try {
     await auth.login(username.value, password.value);
-    const next = typeof route.query.next === "string" && route.query.next ? route.query.next : "/dashboard";
-    router.replace(next);
+    const nextRaw = typeof route.query.next === "string" ? route.query.next.trim() : "";
+    const next = nextRaw && nextRaw !== "/login" ? nextRaw : "/dashboard";
+    window.location.replace(next);
   } catch (err) {
     error.value = err?.message || "Login failed";
   } finally {

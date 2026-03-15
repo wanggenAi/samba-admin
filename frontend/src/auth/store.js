@@ -44,8 +44,13 @@ function hasPermission(permission) {
 
 async function login(username, password) {
   const res = await apiLogin({ username, password });
-  setToken(res?.access_token || "");
-  setUser(res?.user || null);
+  const token = typeof res?.access_token === "string" ? res.access_token.trim() : "";
+  const user = normalizeUser(res?.user || null);
+  if (!token || !user) {
+    throw new Error("Login response invalid: missing token or user.");
+  }
+  setToken(token);
+  setUser(user);
   return state.user;
 }
 
@@ -84,4 +89,3 @@ export function useAuthStore() {
     fetchMe,
   };
 }
-

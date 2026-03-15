@@ -19,6 +19,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Samba Admin API (AD DC)",
         version="1.0.0",
+        swagger_ui_parameters={"persistAuthorization": True},
     )
 
     cors_origins = settings.cors_origins or ["*"]

@@ -2,16 +2,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..services.auth_service import auth_service
 
-bearer_scheme = HTTPBearer(auto_error=False)
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="BearerAuth",
+    description="Input JWT token as: Bearer <token>",
+)
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
 ) -> dict:
     if not credentials:
         raise HTTPException(status_code=401, detail="missing bearer token")

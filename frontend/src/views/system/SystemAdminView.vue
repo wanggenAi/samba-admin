@@ -872,6 +872,7 @@ td {
   right: 16px;
   z-index: 1200;
   width: min(460px, calc(100vw - 32px));
+  pointer-events: none;
 }
 .global-toast {
   margin: 0;
