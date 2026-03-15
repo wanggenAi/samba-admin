@@ -273,10 +273,15 @@ Group=sambaadmin
 WorkingDirectory=/opt/samba-admin/backend
 # CHANGE: env file location (must be readable by systemd)
 EnvironmentFile=/etc/samba-admin/backend.env
+# Ensure venv exists before dependency sync (idempotent)
+ExecStartPre=/usr/bin/bash -lc 'test -x /opt/samba-admin/backend/.venv/bin/python || python3 -m venv /opt/samba-admin/backend/.venv'
+# Install/update Python deps after each git pull before app start
+ExecStartPre=/opt/samba-admin/backend/.venv/bin/pip install --disable-pip-version-check -r /opt/samba-admin/backend/requirements.txt
 # CHANGE: uvicorn path (venv), bind host/port as needed
 ExecStart=/opt/samba-admin/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=300
 TimeoutStopSec=20
 
 [Install]
@@ -320,10 +325,13 @@ Group=sambaadmin
 WorkingDirectory=/opt/samba-admin/frontend
 # CHANGE: backend URL reachable from frontend service host
 Environment=VITE_API_TARGET=http://127.0.0.1:8000
+# Install/update Node deps from lockfile before frontend start
+ExecStartPre=/usr/bin/npm ci --no-audit --no-fund
 # CHANGE: npm path/port if your environment differs
 ExecStart=/usr/bin/npm run preview -- --host 0.0.0.0 --port 4173
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=300
 TimeoutStopSec=20
 
 [Install]
