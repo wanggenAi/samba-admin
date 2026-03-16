@@ -12,6 +12,18 @@ services:
       - ./data:/app/backend/app/data
     restart: unless-stopped
 
+    # CPU limit for backend container.
+    # Examples: "0.50" = half core, "1.00" = one core, "2.00" = two cores.
+    cpus: "1.00"
+
+    # Hard memory limit for backend container.
+    # Increase if backend workloads need more RAM.
+    mem_limit: "1g"
+
+    # Soft memory reservation (best-effort target under pressure).
+    # Keep this lower than mem_limit.
+    mem_reservation: "512m"
+
   frontend:
     build:
       context: .
@@ -22,3 +34,12 @@ services:
     ports:
       - "5173:80"
     restart: unless-stopped
+
+    # CPU limit for frontend (nginx) container.
+    cpus: "0.50"
+
+    # Hard memory limit for frontend container.
+    mem_limit: "512m"
+
+    # Soft memory reservation for frontend container.
+    mem_reservation: "256m"

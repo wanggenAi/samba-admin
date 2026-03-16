@@ -187,3 +187,52 @@ Container startup failed:
   - `docker compose logs backend`
   - `docker compose logs frontend`
 - Confirm Docker is running and disk space is sufficient.
+
+## 10. Manage With systemd (Run From Any Path)
+
+Use the bundled service template and installer:
+
+```bash
+./docker/systemd/install-systemd.sh
+```
+
+Then control services with `systemctl` from any directory:
+
+```bash
+# Start
+sudo systemctl start samba-admin@backend
+sudo systemctl start samba-admin@frontend
+sudo systemctl start samba-admin@all
+
+# Stop
+sudo systemctl stop samba-admin@backend
+sudo systemctl stop samba-admin@frontend
+sudo systemctl stop samba-admin@all
+
+# Status / logs
+sudo systemctl status samba-admin@all
+journalctl -u samba-admin@all -f
+```
+
+How instances map to compose commands:
+- `samba-admin@backend` -> `docker compose up -d backend`
+- `samba-admin@frontend` -> `docker compose up -d --no-deps frontend`
+- `samba-admin@all` -> `docker compose up -d`
+
+Notes:
+- The installer writes `/etc/systemd/system/samba-admin@.service` with your current repo absolute path.
+- If you move the repo to a different path, run `./docker/systemd/install-systemd.sh` again.
+
+## 11. CPU And Memory Limits
+
+Resource limits are configured per service in `docker-compose.yml`:
+
+- `cpus`: hard CPU quota (string value, e.g. `"0.50"`, `"1.00"`, `"2.00"`).
+- `mem_limit`: hard memory cap (e.g. `"512m"`, `"1g"`, `"2g"`).
+- `mem_reservation`: soft memory target under pressure; keep it lower than `mem_limit`.
+
+After editing resource values, apply changes:
+
+```bash
+docker compose up -d
+```
