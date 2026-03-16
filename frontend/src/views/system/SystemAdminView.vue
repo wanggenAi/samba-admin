@@ -56,8 +56,9 @@
 
     <section class="panel">
       <h3>Users</h3>
-      <div class="table-wrap" :class="{ loading: loading }">
-        <table>
+      <div class="table-host" :class="{ loading: loading }">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>Username</th>
@@ -86,7 +87,8 @@
               </td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
         <DataLoadingOverlay :show="loading" text="Loading users..." />
       </div>
     </section>
@@ -111,8 +113,9 @@
         {{ savingPermission ? "Saving..." : "Create Permission" }}
       </button>
 
-      <div class="table-wrap mt-10" :class="{ loading: loading }">
-        <table>
+      <div class="table-host mt-10" :class="{ loading: loading }">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>Name</th>
@@ -132,7 +135,8 @@
               </td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
         <DataLoadingOverlay :show="loading" text="Loading permissions..." />
       </div>
     </section>
@@ -174,8 +178,9 @@
         {{ savingRole ? "Saving..." : "Create Role" }}
       </button>
 
-      <div class="table-wrap mt-10" :class="{ loading: loading }">
-        <table>
+      <div class="table-host mt-10" :class="{ loading: loading }">
+        <div class="table-wrap">
+          <table>
           <thead>
             <tr>
               <th>Role</th>
@@ -197,7 +202,8 @@
               </td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
         <DataLoadingOverlay :show="loading" text="Loading roles..." />
       </div>
     </section>
@@ -791,10 +797,12 @@ input:not([type]) {
   font-size: 12px;
 }
 .table-wrap {
-  position: relative;
   overflow: auto;
 }
-.table-wrap.loading {
+.table-host {
+  position: relative;
+}
+.table-host.loading {
   pointer-events: none;
 }
 .mt-10 {

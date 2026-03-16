@@ -233,8 +233,9 @@
           </div>
         </div>
 
-        <div class="table-wrap" :class="{ loading: loadingUsers }">
-          <table class="user-table">
+        <div class="table-host" :class="{ loading: loadingUsers }">
+          <div class="table-wrap">
+            <table class="user-table">
             <thead>
               <tr>
                 <th class="check-col">
@@ -329,7 +330,8 @@
                 <td colspan="12" class="muted">No users found.</td>
               </tr>
             </tbody>
-          </table>
+            </table>
+          </div>
           <DataLoadingOverlay :show="loadingUsers" text="Loading users..." />
         </div>
 
@@ -1470,15 +1472,19 @@ watch(totalPages, (next) => {
   color: #94a3b8;
 }
 .table-wrap {
-  position: relative;
-  flex: 1;
+  height: 100%;
   overflow: auto;
   border: 1px solid #e6edf4;
   border-radius: 12px;
   background: #fff;
   max-height: none;
 }
-.table-wrap.loading {
+.table-host {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+}
+.table-host.loading {
   pointer-events: none;
 }
 .tree-body-host {

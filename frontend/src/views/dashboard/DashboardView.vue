@@ -177,13 +177,14 @@
         <button class="btn" type="button" @click="resetFilters">Reset Filters</button>
       </div>
 
-      <div
-        class="table-wrap"
-        :class="{ autoscroll: autoScrollEnabled, loading }"
-        ref="tableWrapRef"
-        @wheel="onTableWheel"
-      >
-        <table class="log-table">
+      <div class="table-host" :class="{ loading }">
+        <div
+          class="table-wrap"
+          :class="{ autoscroll: autoScrollEnabled }"
+          ref="tableWrapRef"
+          @wheel="onTableWheel"
+        >
+          <table class="log-table">
           <thead>
             <tr>
               <th>Username</th>
@@ -244,7 +245,8 @@
               <td colspan="8" class="muted">No users found.</td>
             </tr>
           </tbody>
-        </table>
+          </table>
+        </div>
         <DataLoadingOverlay :show="loading" text="Loading users..." />
       </div>
 
@@ -1231,7 +1233,6 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   background: #f8fafc;
 }
 .table-wrap {
-  position: relative;
   max-height: 62vh;
   overflow: auto;
   scrollbar-gutter: stable both-edges;
@@ -1239,7 +1240,10 @@ watch([paginatedUsers, currentPage, pageSize, seamlessScrollActive], async () =>
   border-radius: 12px;
   background: #fff;
 }
-.table-wrap.loading {
+.table-host {
+  position: relative;
+}
+.table-host.loading {
   pointer-events: none;
 }
 .table-wrap.autoscroll {
