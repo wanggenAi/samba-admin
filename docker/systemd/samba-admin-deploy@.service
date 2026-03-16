@@ -14,25 +14,22 @@ WorkingDirectory=__PROJECT_DIR__
 # Example: /usr/local/bin/docker
 Environment="DOCKER_BIN=/usr/bin/docker"
 Environment="GIT_BIN=/usr/bin/git"
-Environment="PROJECT_DIR=__PROJECT_DIR__"
-Environment="COMPOSE_FILE_PATH=__PROJECT_DIR__/docker-compose.yml"
 
 # Deploy commands by instance name (rebuild image and recreate container):
 # - samba-admin-deploy@backend => deploy backend only
 # - samba-admin-deploy@frontend => deploy frontend only (without dependencies)
 # - samba-admin-deploy@all => deploy all services in compose
 ExecStart=/bin/bash -c '\
-  unset BACKEND_PORT FRONTEND_PORT BACKEND_DATA_PATH BACKEND_ENV_FILE \
-        BACKEND_CPUS BACKEND_MEM_LIMIT BACKEND_MEM_RESERVATION \
-        FRONTEND_CPUS FRONTEND_MEM_LIMIT FRONTEND_MEM_RESERVATION \
-        COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME; \
-  compose_env_file=\"${PROJECT_DIR}/docker/compose.env\"; \
-  env_opt=\"\"; [ -f \"$compose_env_file\" ] && env_opt=\"--env-file $compose_env_file\"; \
-  ${GIT_BIN} -C \"${PROJECT_DIR}\" pull --ff-only && \
+  compose_env_file=\"__PROJECT_DIR__/docker/compose.env\"; \
+  if [ ! -f \"$compose_env_file\" ]; then \
+    echo \"Missing compose env file: $compose_env_file\"; \
+    exit 1; \
+  fi; \
+  ${GIT_BIN} -C \"__PROJECT_DIR__\" pull --ff-only && \
   case "%i" in \
-    backend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d --build --force-recreate backend ;; \
-    frontend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d --build --force-recreate --no-deps frontend ;; \
-    all) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d --build --force-recreate ;; \
+    backend) ${DOCKER_BIN} compose --project-directory \"__PROJECT_DIR__\" -f \"__PROJECT_DIR__/docker-compose.yml\" --env-file \"$compose_env_file\" up -d --build --force-recreate backend ;; \
+    frontend) ${DOCKER_BIN} compose --project-directory \"__PROJECT_DIR__\" -f \"__PROJECT_DIR__/docker-compose.yml\" --env-file \"$compose_env_file\" up -d --build --force-recreate --no-deps frontend ;; \
+    all) ${DOCKER_BIN} compose --project-directory \"__PROJECT_DIR__\" -f \"__PROJECT_DIR__/docker-compose.yml\" --env-file \"$compose_env_file\" up -d --build --force-recreate ;; \
     *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
   esac'
 
