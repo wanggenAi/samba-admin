@@ -14,38 +14,40 @@ WorkingDirectory=__PROJECT_DIR__
 # You can override the compose binary if needed.
 # Example: /usr/local/bin/docker
 Environment="DOCKER_BIN=/usr/bin/docker"
+Environment="PROJECT_DIR=__PROJECT_DIR__"
+Environment="COMPOSE_FILE_PATH=__PROJECT_DIR__/docker-compose.yml"
 
 # Start commands by instance name:
 # - samba-admin@backend => start only backend
 # - samba-admin@frontend => start only frontend (without dependencies)
 # - samba-admin@all => start all services in compose
-ExecStart=/bin/bash -lc '\
+ExecStart=/bin/bash -c '\
   unset BACKEND_PORT FRONTEND_PORT BACKEND_DATA_PATH BACKEND_ENV_FILE \
         BACKEND_CPUS BACKEND_MEM_LIMIT BACKEND_MEM_RESERVATION \
         FRONTEND_CPUS FRONTEND_MEM_LIMIT FRONTEND_MEM_RESERVATION \
         COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME; \
-  compose_env_file=\"$PWD/docker/compose.env\"; \
+  compose_env_file=\"${PROJECT_DIR}/docker/compose.env\"; \
   env_opt=\"\"; [ -f \"$compose_env_file\" ] && env_opt=\"--env-file $compose_env_file\"; \
   case "%i" in \
-    backend) ${DOCKER_BIN} compose ${env_opt} up -d backend ;; \
-    frontend) ${DOCKER_BIN} compose ${env_opt} up -d --no-deps frontend ;; \
-    all) ${DOCKER_BIN} compose ${env_opt} up -d ;; \
+    backend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d backend ;; \
+    frontend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d --no-deps frontend ;; \
+    all) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} up -d ;; \
     *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
   esac'
 
 # Stop commands by instance name.
 # For "all" we use "down" to stop and remove the compose stack.
-ExecStop=/bin/bash -lc '\
+ExecStop=/bin/bash -c '\
   unset BACKEND_PORT FRONTEND_PORT BACKEND_DATA_PATH BACKEND_ENV_FILE \
         BACKEND_CPUS BACKEND_MEM_LIMIT BACKEND_MEM_RESERVATION \
         FRONTEND_CPUS FRONTEND_MEM_LIMIT FRONTEND_MEM_RESERVATION \
         COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME; \
-  compose_env_file=\"$PWD/docker/compose.env\"; \
+  compose_env_file=\"${PROJECT_DIR}/docker/compose.env\"; \
   env_opt=\"\"; [ -f \"$compose_env_file\" ] && env_opt=\"--env-file $compose_env_file\"; \
   case "%i" in \
-    backend) ${DOCKER_BIN} compose ${env_opt} stop backend ;; \
-    frontend) ${DOCKER_BIN} compose ${env_opt} stop frontend ;; \
-    all) ${DOCKER_BIN} compose ${env_opt} down ;; \
+    backend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} stop backend ;; \
+    frontend) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} stop frontend ;; \
+    all) ${DOCKER_BIN} compose --project-directory \"${PROJECT_DIR}\" -f \"${COMPOSE_FILE_PATH}\" ${env_opt} down ;; \
     *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
   esac'
 
