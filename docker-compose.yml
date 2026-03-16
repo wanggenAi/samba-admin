@@ -27,13 +27,32 @@ services:
     # Keep this lower than mem_limit.
     mem_reservation: "${BACKEND_MEM_RESERVATION:-512m}"
 
+    # Container log rotation (prevent unbounded json-file growth).
+    logging:
+      driver: json-file
+      options:
+        # Max size per log file before rotation.
+        max-size: "${BACKEND_LOG_MAX_SIZE:-10m}"
+        # Max number of rotated log files to keep.
+        max-file: "${BACKEND_LOG_MAX_FILE:-3}"
+
+    # Backend health endpoint check used by frontend dependency condition.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   frontend:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
     container_name: samba-admin-frontend
     depends_on:
-      - backend
+      # Wait until backend passes healthcheck when starting the full stack.
+      backend:
+        condition: service_healthy
     ports:
       # Host port is configurable via FRONTEND_PORT in docker/compose.env (default: 5173).
       - "${FRONTEND_PORT:-5173}:80"
@@ -47,3 +66,12 @@ services:
 
     # Soft memory reservation for frontend container.
     mem_reservation: "${FRONTEND_MEM_RESERVATION:-256m}"
+
+    # Container log rotation (prevent unbounded json-file growth).
+    logging:
+      driver: json-file
+      options:
+        # Max size per log file before rotation.
+        max-size: "${FRONTEND_LOG_MAX_SIZE:-10m}"
+        # Max number of rotated log files to keep.
+        max-file: "${FRONTEND_LOG_MAX_FILE:-3}"

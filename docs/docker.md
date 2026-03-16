@@ -127,9 +127,13 @@ If advanced compose layering is needed later, add it as a separate documented ch
 - `BACKEND_CPUS` (default `1.00`)
 - `BACKEND_MEM_LIMIT` (default `1g`)
 - `BACKEND_MEM_RESERVATION` (default `512m`)
+- `BACKEND_LOG_MAX_SIZE` (default `10m`)
+- `BACKEND_LOG_MAX_FILE` (default `3`)
 - `FRONTEND_CPUS` (default `0.50`)
 - `FRONTEND_MEM_LIMIT` (default `512m`)
 - `FRONTEND_MEM_RESERVATION` (default `256m`)
+- `FRONTEND_LOG_MAX_SIZE` (default `10m`)
+- `FRONTEND_LOG_MAX_FILE` (default `3`)
 
 Example:
 
@@ -141,9 +145,13 @@ BACKEND_DATA_PATH=./data
 BACKEND_CPUS=1.00
 BACKEND_MEM_LIMIT=1g
 BACKEND_MEM_RESERVATION=512m
+BACKEND_LOG_MAX_SIZE=10m
+BACKEND_LOG_MAX_FILE=3
 FRONTEND_CPUS=0.50
 FRONTEND_MEM_LIMIT=512m
 FRONTEND_MEM_RESERVATION=256m
+FRONTEND_LOG_MAX_SIZE=10m
+FRONTEND_LOG_MAX_FILE=3
 ```
 
 Apply changes:
@@ -151,6 +159,10 @@ Apply changes:
 ```bash
 docker compose --env-file docker/compose.env up -d --force-recreate
 ```
+
+Notes:
+- Full-stack startup now waits for backend health (`/health`) before frontend starts.
+- Container logs use rotation (`max-size` + `max-file`) to prevent disk growth from unbounded Docker json logs.
 
 ## 7. Daily Operations
 
@@ -256,6 +268,7 @@ sudo systemctl status samba-admin-deploy@all
 Notes:
 - Deploy unit is `oneshot`; use `start`, not `restart`
 - Runtime restart remains `samba-admin@all`
+- `samba-admin@frontend` and `samba-admin-deploy@frontend` intentionally use `--no-deps` for frontend-only actions
 
 ## 9. Validation Commands
 
@@ -278,6 +291,13 @@ docker inspect samba-admin-backend --format 'NanoCpus={{.HostConfig.NanoCpus}} M
 docker inspect samba-admin-frontend --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
 ```
 
+Check applied log rotation:
+
+```bash
+docker inspect samba-admin-backend --format 'Log={{.HostConfig.LogConfig.Type}} Size={{index .HostConfig.LogConfig.Config "max-size"}} File={{index .HostConfig.LogConfig.Config "max-file"}}'
+docker inspect samba-admin-frontend --format 'Log={{.HostConfig.LogConfig.Type}} Size={{index .HostConfig.LogConfig.Config "max-size"}} File={{index .HostConfig.LogConfig.Config "max-file"}}'
+```
+
 ## 10. Troubleshooting
 
 ### 10.1 `fatal: detected dubious ownership`
@@ -291,8 +311,10 @@ fatal: detected dubious ownership in repository at '/home/<user>/samba-admin'
 Fix:
 
 ```bash
-sudo git config --global --add safe.directory /home/parallels/samba-admin
-sudo git config --system --add safe.directory /home/parallels/samba-admin
+cd /absolute/path/to/samba-admin
+PROJECT_DIR="$(pwd)"
+sudo git config --global --add safe.directory "$PROJECT_DIR"
+sudo git config --system --add safe.directory "$PROJECT_DIR"
 ```
 
 Verify:
@@ -338,7 +360,7 @@ curl -I https://github.com --max-time 10
 If manual `docker compose --env-file docker/compose.env ...` works but systemd behavior differs:
 
 ```bash
-cd /home/parallels/samba-admin
+cd /absolute/path/to/samba-admin
 git pull --ff-only origin main
 ./docker/systemd/install-systemd.sh
 sudo systemctl daemon-reload
@@ -364,11 +386,12 @@ sudo systemctl daemon-reload
 ### 10.6 Full recovery sequence
 
 ```bash
-cd /home/parallels/samba-admin
+cd /absolute/path/to/samba-admin
+PROJECT_DIR="$(pwd)"
 git pull --ff-only origin main
 ./docker/systemd/install-systemd.sh
-sudo git config --global --add safe.directory /home/parallels/samba-admin
-sudo git config --system --add safe.directory /home/parallels/samba-admin
+sudo git config --global --add safe.directory "$PROJECT_DIR"
+sudo git config --system --add safe.directory "$PROJECT_DIR"
 sudo systemctl daemon-reload
 sudo systemctl reset-failed samba-admin-deploy@all
 sudo systemctl start samba-admin-deploy@all
