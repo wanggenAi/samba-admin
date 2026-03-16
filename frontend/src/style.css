@@ -1,5 +1,7 @@
 :root {
-  font-family: "PT Sans", "Segoe UI", Tahoma, Arial, sans-serif;
+  /* Cross-platform system font stack for consistent metrics on Windows/macOS/Linux. */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell,
+    "Helvetica Neue", Arial, "Liberation Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   line-height: 1.5;
   font-weight: 400;
   color: #1f2937;

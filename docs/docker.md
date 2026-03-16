@@ -2,6 +2,68 @@
 
 This document explains how to run `samba-admin` using Docker.
 
+## 0. Quick Install (Ubuntu, 1 command)
+
+If Docker is not installed yet on Ubuntu, you can install Docker Engine + Compose plugin with:
+
+```bash
+curl -fsSL https://get.docker.com | sh
+```
+
+Verify required commands:
+
+```bash
+docker --version
+docker compose version
+```
+
+Optional: run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Remove non-sudo access later (remove user from `docker` group):
+
+```bash
+sudo gpasswd -d $USER docker
+```
+
+Then log out and log in again (or reboot) for group changes to take effect.
+
+Manage Docker service with systemd:
+
+```bash
+# Start / stop / restart
+sudo systemctl start docker
+sudo systemctl stop docker
+sudo systemctl restart docker
+
+# Enable / disable auto-start at boot
+sudo systemctl enable docker
+sudo systemctl disable docker
+
+# Check service status
+sudo systemctl status docker
+```
+
+Check Docker resource usage:
+
+```bash
+# Real-time CPU / memory / network / block I/O usage for running containers
+docker stats
+
+# Real-time usage for specific containers only
+docker stats samba-admin-backend samba-admin-frontend
+
+# Docker disk usage summary (images, containers, volumes, build cache)
+docker system df
+
+# Detailed Docker disk usage (verbose)
+docker system df -v
+```
+
 ## 1. Docker Files
 
 ```text
@@ -212,6 +274,10 @@ sudo systemctl stop samba-admin@all
 # Status / logs
 sudo systemctl status samba-admin@all
 journalctl -u samba-admin@all -f
+
+# Enable / disable auto-start at boot (recommended instance: all)
+sudo systemctl enable samba-admin@all
+sudo systemctl disable samba-admin@all
 ```
 
 How instances map to compose commands:
@@ -222,6 +288,7 @@ How instances map to compose commands:
 Notes:
 - The installer writes `/etc/systemd/system/samba-admin@.service` with your current repo absolute path.
 - If you move the repo to a different path, run `./docker/systemd/install-systemd.sh` again.
+- `samba-admin@all` is usually the best instance to enable at boot.
 
 ## 11. CPU And Memory Limits
 
