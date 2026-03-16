@@ -301,6 +301,88 @@ Notes:
 - Use `samba-admin-deploy@...` only when you need rebuild/recreate after code changes.
 - `samba-admin-deploy@...` runs `git pull --ff-only` before compose deploy.
 - Deploy will fail if the repo has uncommitted local changes or non-fast-forward pull conflicts.
+- If deploy fails with `fatal: detected dubious ownership`, allow this repo for root git:
+  - `sudo git config --global --add safe.directory /absolute/path/to/samba-admin`
+  - Example: `sudo git config --global --add safe.directory /home/parallels/samba-admin`
+
+### 10.1 Deploy Pitfalls (Important)
+
+`samba-admin-deploy@...` runs as `root` and executes:
+1. `git pull --ff-only`
+2. `docker compose up -d --build --force-recreate ...`
+
+Because it runs as `root`, this command can fail even when your normal user `git pull` works.
+
+#### A) `fatal: detected dubious ownership`
+
+Symptom in logs:
+
+```text
+fatal: detected dubious ownership in repository at '/home/<user>/samba-admin'
+```
+
+Fix (recommended):
+
+```bash
+# Replace with your real repo path
+sudo git config --global --add safe.directory /home/parallels/samba-admin
+sudo git config --system --add safe.directory /home/parallels/samba-admin
+```
+
+Verify:
+
+```bash
+sudo git config --global --get-all safe.directory
+sudo git config --system --get-all safe.directory
+```
+
+Both commands should include your repo path.
+
+#### B) Unit points to old path after moving repo
+
+Check active path:
+
+```bash
+systemctl cat samba-admin-deploy@all | grep WorkingDirectory
+```
+
+If path is wrong, reinstall units from the current repo path:
+
+```bash
+cd /absolute/path/to/current/samba-admin
+./docker/systemd/install-systemd.sh
+sudo systemctl daemon-reload
+```
+
+#### C) `git pull --ff-only` fails
+
+Common reasons:
+- local uncommitted changes
+- branch divergence (not fast-forward)
+- missing Git credentials/network issue
+
+Check quickly:
+
+```bash
+cd /absolute/path/to/samba-admin
+git status --porcelain
+git pull --ff-only
+```
+
+If `git pull --ff-only` fails manually, fix Git state first, then rerun deploy.
+
+#### D) Full recovery sequence (copy/paste)
+
+```bash
+cd /home/parallels/samba-admin
+./docker/systemd/install-systemd.sh
+sudo git config --global --add safe.directory /home/parallels/samba-admin
+sudo git config --system --add safe.directory /home/parallels/samba-admin
+sudo systemctl daemon-reload
+sudo systemctl reset-failed samba-admin-deploy@all
+sudo systemctl start samba-admin-deploy@all
+sudo systemctl status samba-admin-deploy@all --no-pager -l
+```
 
 ## 11. CPU And Memory Limits
 
