@@ -48,3 +48,4 @@ frontend/node_modules/
 # Docker local secrets
 # ========================
 docker/backend.env
+docker-compose.override.yml

@@ -1,0 +1,30 @@
+# Local server override file (not committed).
+# Copy to docker-compose.override.yml and adjust values for this host only.
+#
+# Docker Compose automatically loads this file together with docker-compose.yml
+# when both files are in the same directory.
+
+services:
+  backend:
+    # Example: custom host-side data path
+    # volumes:
+    #   - /srv/samba-admin/data:/app/backend/app/data
+
+    # Example: custom host port
+    # ports:
+    #   - "18000:8000"
+
+    # Example: server-specific resource limits
+    # cpus: "2.00"
+    # mem_limit: "2g"
+    # mem_reservation: "1g"
+
+  frontend:
+    # Example: custom host port
+    # ports:
+    #   - "15173:80"
+
+    # Example: server-specific resource limits
+    # cpus: "1.00"
+    # mem_limit: "1g"
+    # mem_reservation: "512m"
