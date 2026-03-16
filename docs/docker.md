@@ -1,19 +1,17 @@
 # Docker Deployment
 
-This guide explains how to deploy and operate `samba-admin` with Docker on Ubuntu/Linux.
+This document is the single source of truth for Docker deployment of `samba-admin`.
 
-## 0. Scope And Goals
+## 1. What This Guide Covers
 
-This document covers:
-- Docker installation and verification
-- First-time project startup
-- Day-to-day operations (start/stop/logs/rebuild)
-- systemd management from any working directory
-- Fast runtime restart vs full deploy rebuild
-- Unified local configuration in `docker/` env files
-- Common deployment pitfalls and exact recovery commands
+- Docker installation on Ubuntu
+- First-time startup
+- Daily operations
+- Unified configuration policy (`docker/backend.env` + `docker/compose.env`)
+- systemd runtime and deploy workflows
+- Troubleshooting for real production issues
 
-## 1. Project Docker Files
+## 2. Deployment Files
 
 ```text
 samba-admin/
@@ -29,11 +27,11 @@ samba-admin/
 │     ├─ samba-admin@.service
 │     ├─ samba-admin-deploy@.service
 │     └─ install-systemd.sh
-├─ docker-compose.yml            # baseline tracked in Git
-└─ data/                         # persistent runtime data on host
+├─ docker-compose.yml            # tracked baseline
+└─ data/                         # backend runtime data on host
 ```
 
-## 2. Install Docker On Ubuntu
+## 3. Install Docker (Ubuntu)
 
 Quick install:
 
@@ -59,233 +57,163 @@ sudo systemctl enable docker
 sudo systemctl disable docker
 ```
 
-Optional: run Docker without `sudo`:
+Optional Docker group (no `sudo` for docker CLI):
 
 ```bash
 sudo usermod -aG docker $USER
 newgrp docker
 ```
 
-Remove non-sudo access later:
+Remove Docker group access later:
 
 ```bash
 sudo gpasswd -d $USER docker
 ```
 
-## 3. First-Time Project Startup
+## 4. First-Time Startup
 
-1. Create local env files under `docker/`:
+1. Create local env files:
 
 ```bash
 cp docker/backend.env.example docker/backend.env
 cp docker/compose.env.example docker/compose.env
 ```
 
-2. Edit `docker/backend.env` and set at least:
+2. Edit `docker/backend.env` and set required values at least:
 - `APP_JWT_SECRET`
 - `LDAP_HOST`
 - `LDAP_BIND_USER`
 - `LDAP_BIND_PASSWORD`
 - `LDAP_BASE_DN`
 
-3. (Optional) Edit `docker/compose.env` for host ports, backend data path, and resource limits.
+3. (Optional) Edit `docker/compose.env` for ports, data path, and limits.
 
-4. Build and start all services:
+4. Build and start:
 
 ```bash
 docker compose --env-file docker/compose.env up -d --build
 ```
 
-Default endpoints:
+Default URLs:
 - Frontend: `http://localhost:5173`
-- Backend API: `http://localhost:8000`
+- Backend: `http://localhost:8000`
 - Swagger: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/health`
 
-## 4. Daily Operations
+## 5. Configuration Policy (Important)
 
-Start stack:
+Current policy is intentionally simple:
+- Do not use `docker-compose.override.yml`
+- Do not edit tracked `docker-compose.yml` directly on servers
+- Put server-specific values only in:
+  - `docker/backend.env`
+  - `docker/compose.env`
+
+Why:
+- deterministic behavior
+- less `git pull --ff-only` conflict risk
+- easier operations and debugging
+
+If advanced compose layering is needed later, add it as a separate documented change.
+
+## 6. `docker/compose.env` Variables
+
+`docker-compose.yml` reads runtime/deploy parameters from these variables:
+
+- `BACKEND_ENV_FILE` (default `docker/backend.env`)
+- `BACKEND_PORT` (default `8000`)
+- `FRONTEND_PORT` (default `5173`)
+- `BACKEND_DATA_PATH` (default `./data`)
+- `BACKEND_CPUS` (default `1.00`)
+- `BACKEND_MEM_LIMIT` (default `1g`)
+- `BACKEND_MEM_RESERVATION` (default `512m`)
+- `FRONTEND_CPUS` (default `0.50`)
+- `FRONTEND_MEM_LIMIT` (default `512m`)
+- `FRONTEND_MEM_RESERVATION` (default `256m`)
+
+Example:
+
+```bash
+BACKEND_ENV_FILE=docker/backend.env
+BACKEND_PORT=8000
+FRONTEND_PORT=5174
+BACKEND_DATA_PATH=./data
+BACKEND_CPUS=1.00
+BACKEND_MEM_LIMIT=1g
+BACKEND_MEM_RESERVATION=512m
+FRONTEND_CPUS=0.50
+FRONTEND_MEM_LIMIT=512m
+FRONTEND_MEM_RESERVATION=256m
+```
+
+Apply changes:
+
+```bash
+docker compose --env-file docker/compose.env up -d --force-recreate
+```
+
+## 7. Daily Operations
+
+Start:
 
 ```bash
 docker compose --env-file docker/compose.env up -d
 ```
 
-Stop stack:
+Stop:
 
 ```bash
 docker compose --env-file docker/compose.env down
 ```
 
-Rebuild and restart:
+Rebuild and recreate:
 
 ```bash
 docker compose --env-file docker/compose.env up -d --build --force-recreate
 ```
 
-View status:
+Status:
 
 ```bash
 docker compose --env-file docker/compose.env ps
 ```
 
-View logs:
+Logs:
 
 ```bash
 docker compose --env-file docker/compose.env logs -f backend
 docker compose --env-file docker/compose.env logs -f frontend
 ```
 
-Host-side log file:
+Host log file:
 
 ```bash
 tail -f data/logs/backend.log
 ```
 
-## 5. Resource Usage And Data
-
-Real-time container usage:
+Resource usage:
 
 ```bash
 docker stats
 docker stats samba-admin-backend samba-admin-frontend
-```
-
-Disk usage summary:
-
-```bash
 docker system df
 docker system df -v
 ```
 
-Data persistence mapping:
+## 8. systemd Workflows
 
-```yaml
-services:
-  backend:
-    volumes:
-      - ${BACKEND_DATA_PATH:-./data}:/app/backend/app/data
-```
-
-Backup important runtime data:
-- `data/rbac.json`
-- `data/logs/`
-
-## 6. Compose Variables In `docker/compose.env`
-
-### 6.1 Change host ports
-
-Host ports are parameterized in `docker-compose.yml`:
-- backend: `${BACKEND_PORT:-8000}:8000`
-- frontend: `${FRONTEND_PORT:-5173}:80`
-
-Set custom ports in `docker/compose.env`:
-
-```bash
-BACKEND_PORT=18000
-FRONTEND_PORT=15173
-```
-
-Apply:
-
-```bash
-docker compose --env-file docker/compose.env up -d --build
-```
-
-### 6.2 Change persistent data path
-
-Set backend data mapping source path:
-
-```bash
-BACKEND_DATA_PATH=/srv/samba-admin/data
-```
-
-Or project-relative:
-
-```bash
-BACKEND_DATA_PATH=./runtime-data
-```
-
-### 6.3 Change backend env file path
-
-Set backend env file path:
-
-```bash
-BACKEND_ENV_FILE=/etc/samba-admin/backend.env
-```
-
-### 6.4 Change CPU and memory limits
-
-Set resource values:
-
-```bash
-BACKEND_CPUS=1.50
-BACKEND_MEM_LIMIT=2g
-BACKEND_MEM_RESERVATION=1g
-FRONTEND_CPUS=0.75
-FRONTEND_MEM_LIMIT=768m
-FRONTEND_MEM_RESERVATION=384m
-```
-
-Apply:
-
-```bash
-docker compose --env-file docker/compose.env up -d
-```
-
-## 7. Configuration Policy (Current)
-
-Current project policy:
-- do not use `docker-compose.override.yml`
-- do not edit tracked `docker-compose.yml` on servers
-- put routine server-specific values only in:
-  - `docker/backend.env`
-  - `docker/compose.env`
-
-This keeps deployment behavior deterministic and reduces `git pull --ff-only` conflicts.
-
-If advanced compose layering is needed in the future, add override files then and document them explicitly.
-
-## 8. CPU And Memory Limits
-
-Parameters:
-- `cpus`: CPU quota (e.g. `"0.50"`, `"1.00"`, `"2.00"`)
-- `mem_limit`: hard memory cap (e.g. `"512m"`, `"1g"`)
-- `mem_reservation`: soft target under pressure (must be lower than `mem_limit`)
-
-These are configured via `docker/compose.env` variables:
-- `BACKEND_CPUS`, `BACKEND_MEM_LIMIT`, `BACKEND_MEM_RESERVATION`
-- `FRONTEND_CPUS`, `FRONTEND_MEM_LIMIT`, `FRONTEND_MEM_RESERVATION`
-
-Apply changes:
-
-```bash
-docker compose --env-file docker/compose.env up -d
-```
-
-Verify effective limits:
-
-```bash
-docker inspect samba-admin-backend --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
-docker inspect samba-admin-frontend --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
-```
-
-## 9. systemd Management (Any Directory)
-
-Install units (idempotent; safe to run multiple times):
+Install/update systemd units (safe to run multiple times):
 
 ```bash
 ./docker/systemd/install-systemd.sh
+sudo systemctl daemon-reload
 ```
 
-Installed units:
-- `samba-admin@.service` (runtime service)
-- `samba-admin-deploy@.service` (deploy/rebuild task)
+The installer replaces placeholders with your current absolute repo path.
 
-Both units automatically use `docker/compose.env` when the file exists.
+### 8.1 Runtime Unit (`samba-admin@...`)
 
-### 9.1 Runtime service (`samba-admin@...`)
-
-Use for fast start/stop/restart (no build).
+Purpose: fast operations without build.
 
 ```bash
 sudo systemctl start samba-admin@backend
@@ -301,20 +229,20 @@ sudo systemctl status samba-admin@all
 journalctl -u samba-admin@all -f
 ```
 
-Enable at boot (recommended):
+Boot auto-start:
 
 ```bash
 sudo systemctl enable samba-admin@all
 sudo systemctl disable samba-admin@all
 ```
 
-### 9.2 Deploy service (`samba-admin-deploy@...`)
+### 8.2 Deploy Unit (`samba-admin-deploy@...`)
 
-Use for code deploy and image rebuild.
+Purpose: pull + rebuild + recreate.
 
-What it does:
+What deploy does:
 1. `git pull --ff-only`
-2. `docker compose up -d --build --force-recreate ...`
+2. `docker compose ... up -d --build --force-recreate`
 
 Commands:
 
@@ -325,11 +253,32 @@ sudo systemctl start samba-admin-deploy@all
 sudo systemctl status samba-admin-deploy@all
 ```
 
-Important:
-- deploy is a `oneshot` task; use `start` (not `restart`)
-- runtime `restart` is still for `samba-admin@all`
+Notes:
+- Deploy unit is `oneshot`; use `start`, not `restart`
+- Runtime restart remains `samba-admin@all`
 
-## 10. Common Pitfalls And Recovery
+## 9. Validation Commands
+
+Check resolved compose config:
+
+```bash
+docker compose --env-file docker/compose.env config | sed -n '/frontend:/,/restart/p'
+```
+
+Check actual published ports:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep samba-admin-frontend
+```
+
+Check applied resource limits:
+
+```bash
+docker inspect samba-admin-backend --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
+docker inspect samba-admin-frontend --format 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}}'
+```
+
+## 10. Troubleshooting
 
 ### 10.1 `fatal: detected dubious ownership`
 
@@ -338,9 +287,6 @@ Symptom:
 ```text
 fatal: detected dubious ownership in repository at '/home/<user>/samba-admin'
 ```
-
-Cause:
-- deploy unit runs as `root`, and root Git does not trust repo ownership
 
 Fix:
 
@@ -356,60 +302,12 @@ sudo git config --global --get-all safe.directory
 sudo git config --system --get-all safe.directory
 ```
 
-### 10.2 Unit points to old project path
+### 10.2 `git pull --ff-only` fails in deploy
 
-Check:
-
-```bash
-systemctl cat samba-admin@all | grep WorkingDirectory
-systemctl cat samba-admin-deploy@all | grep WorkingDirectory
-```
-
-If wrong, reinstall from current repo path:
-
-```bash
-cd /absolute/path/to/current/samba-admin
-./docker/systemd/install-systemd.sh
-sudo systemctl daemon-reload
-```
-
-### 10.2.1 systemd port result differs from manual compose
-
-Symptom:
-- `docker compose --env-file docker/compose.env config` shows new port (for example `5174`)
-- but `sudo systemctl restart samba-admin@all` still publishes old port (`5173`)
-
-Cause:
-- root/systemd environment variables can override compose variables (`FRONTEND_PORT`, `BACKEND_PORT`, `COMPOSE_FILE`, etc.)
-
-Fix:
-1. update and reinstall units (latest templates clear conflicting env variables):
-
-```bash
-cd /home/parallels/samba-admin
-git pull --ff-only
-./docker/systemd/install-systemd.sh
-sudo systemctl daemon-reload
-```
-
-2. force recreate frontend once:
-
-```bash
-sudo bash -lc 'cd /home/parallels/samba-admin && docker compose --env-file docker/compose.env up -d --force-recreate --no-deps frontend'
-```
-
-3. verify:
-
-```bash
-docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep samba-admin-frontend
-```
-
-### 10.3 Deploy fails on `git pull --ff-only`
-
-Possible reasons:
-- local uncommitted changes in tracked files
-- branch not fast-forward
-- Git credential/network issue
+Common reasons:
+- uncommitted tracked changes
+- non-fast-forward branch state
+- network/DNS/Git auth issue
 
 Check manually:
 
@@ -419,18 +317,55 @@ git status --porcelain
 git pull --ff-only
 ```
 
-If this manual pull fails, fix Git state first, then run deploy again.
+### 10.3 Network/DNS cannot reach GitHub
 
-### 10.4 Port already in use
+Symptom example:
 
-If host port conflicts:
-- change `BACKEND_PORT` / `FRONTEND_PORT` in `docker/compose.env`
-- redeploy
+```text
+Could not resolve host: github.com
+```
 
-### 10.5 Full recovery sequence
+Quick checks:
+
+```bash
+getent hosts github.com || nslookup github.com
+ping -c 2 1.1.1.1
+curl -I https://github.com --max-time 10
+```
+
+### 10.4 systemd result differs from manual compose
+
+If manual `docker compose --env-file docker/compose.env ...` works but systemd behavior differs:
 
 ```bash
 cd /home/parallels/samba-admin
+git pull --ff-only origin main
+./docker/systemd/install-systemd.sh
+sudo systemctl daemon-reload
+sudo systemctl restart samba-admin@all
+```
+
+Then verify:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep samba-admin-frontend
+```
+
+### 10.5 Repo moved to a new path
+
+Reinstall units from the new repo location:
+
+```bash
+cd /new/absolute/path/to/samba-admin
+./docker/systemd/install-systemd.sh
+sudo systemctl daemon-reload
+```
+
+### 10.6 Full recovery sequence
+
+```bash
+cd /home/parallels/samba-admin
+git pull --ff-only origin main
 ./docker/systemd/install-systemd.sh
 sudo git config --global --add safe.directory /home/parallels/samba-admin
 sudo git config --system --add safe.directory /home/parallels/samba-admin
@@ -439,16 +374,3 @@ sudo systemctl reset-failed samba-admin-deploy@all
 sudo systemctl start samba-admin-deploy@all
 sudo systemctl status samba-admin-deploy@all --no-pager -l
 ```
-
-## 11. Command Mapping Reference
-
-Runtime unit mapping:
-- `samba-admin@backend` -> `docker compose [--env-file docker/compose.env] up -d backend`
-- `samba-admin@frontend` -> `docker compose [--env-file docker/compose.env] up -d --no-deps frontend`
-- `samba-admin@all` -> `docker compose [--env-file docker/compose.env] up -d`
-- `samba-admin@all` stop -> `docker compose [--env-file docker/compose.env] down`
-
-Deploy unit mapping:
-- `samba-admin-deploy@backend` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate backend`
-- `samba-admin-deploy@frontend` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate --no-deps frontend`
-- `samba-admin-deploy@all` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate`
