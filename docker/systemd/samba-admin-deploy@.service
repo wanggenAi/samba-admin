@@ -1,0 +1,35 @@
+[Unit]
+Description=Samba Admin Docker Compose deploy service (%i)
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+
+# Absolute project directory used by docker compose.
+# The install script replaces __PROJECT_DIR__ automatically.
+WorkingDirectory=__PROJECT_DIR__
+
+# You can override the compose binary if needed.
+# Example: /usr/local/bin/docker
+Environment="DOCKER_BIN=/usr/bin/docker"
+Environment="GIT_BIN=/usr/bin/git"
+
+# Deploy commands by instance name (rebuild image and recreate container):
+# - samba-admin-deploy@backend => deploy backend only
+# - samba-admin-deploy@frontend => deploy frontend only (without dependencies)
+# - samba-admin-deploy@all => deploy all services in compose
+ExecStart=/bin/bash -lc '\
+  ${GIT_BIN} pull --ff-only && \
+  case "%i" in \
+    backend) ${DOCKER_BIN} compose up -d --build --force-recreate backend ;; \
+    frontend) ${DOCKER_BIN} compose up -d --build --force-recreate --no-deps frontend ;; \
+    all) ${DOCKER_BIN} compose up -d --build --force-recreate ;; \
+    *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
+  esac'
+
+# Allow enough time for image build and container recreation.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

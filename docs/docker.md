@@ -278,17 +278,29 @@ journalctl -u samba-admin@all -f
 # Enable / disable auto-start at boot (recommended instance: all)
 sudo systemctl enable samba-admin@all
 sudo systemctl disable samba-admin@all
+
+# Deploy with rebuild (slow, for new code/images)
+sudo systemctl start samba-admin-deploy@backend
+sudo systemctl start samba-admin-deploy@frontend
+sudo systemctl start samba-admin-deploy@all
 ```
 
 How instances map to compose commands:
 - `samba-admin@backend` -> `docker compose up -d backend`
 - `samba-admin@frontend` -> `docker compose up -d --no-deps frontend`
 - `samba-admin@all` -> `docker compose up -d`
+- `samba-admin-deploy@backend` -> `docker compose up -d --build --force-recreate backend`
+- `samba-admin-deploy@frontend` -> `docker compose up -d --build --force-recreate --no-deps frontend`
+- `samba-admin-deploy@all` -> `docker compose up -d --build --force-recreate`
 
 Notes:
 - The installer writes `/etc/systemd/system/samba-admin@.service` with your current repo absolute path.
+- The installer also writes `/etc/systemd/system/samba-admin-deploy@.service`.
 - If you move the repo to a different path, run `./docker/systemd/install-systemd.sh` again.
 - `samba-admin@all` is usually the best instance to enable at boot.
+- Use `samba-admin-deploy@...` only when you need rebuild/recreate after code changes.
+- `samba-admin-deploy@...` runs `git pull --ff-only` before compose deploy.
+- Deploy will fail if the repo has uncommitted local changes or non-fast-forward pull conflicts.
 
 ## 11. CPU And Memory Limits
 
