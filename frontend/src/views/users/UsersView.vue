@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>Users</h2>
-        <p class="sub">Browse OU structure, filter users, and bulk-delete selected accounts. [DEPLOY TEST]</p>
+        <p class="sub">Browse OU structure, filter users, and bulk-delete selected accounts.</p>
       </div>
       <div class="page-head-actions">
         <input
