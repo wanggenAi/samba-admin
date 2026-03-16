@@ -373,6 +373,37 @@ cd /absolute/path/to/current/samba-admin
 sudo systemctl daemon-reload
 ```
 
+### 10.2.1 systemd port result differs from manual compose
+
+Symptom:
+- `docker compose --env-file docker/compose.env config` shows new port (for example `5174`)
+- but `sudo systemctl restart samba-admin@all` still publishes old port (`5173`)
+
+Cause:
+- root/systemd environment variables can override compose variables (`FRONTEND_PORT`, `BACKEND_PORT`, `COMPOSE_FILE`, etc.)
+
+Fix:
+1. update and reinstall units (latest templates clear conflicting env variables):
+
+```bash
+cd /home/parallels/samba-admin
+git pull --ff-only
+./docker/systemd/install-systemd.sh
+sudo systemctl daemon-reload
+```
+
+2. force recreate frontend once:
+
+```bash
+sudo bash -lc 'cd /home/parallels/samba-admin && docker compose --env-file docker/compose.env up -d --force-recreate --no-deps frontend'
+```
+
+3. verify:
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep samba-admin-frontend
+```
+
 ### 10.3 Deploy fails on `git pull --ff-only`
 
 Possible reasons:

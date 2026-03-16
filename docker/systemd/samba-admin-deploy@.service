@@ -20,7 +20,12 @@ Environment="GIT_BIN=/usr/bin/git"
 # - samba-admin-deploy@frontend => deploy frontend only (without dependencies)
 # - samba-admin-deploy@all => deploy all services in compose
 ExecStart=/bin/bash -lc '\
-  env_opt=\"\"; [ -f docker/compose.env ] && env_opt=\"--env-file docker/compose.env\"; \
+  unset BACKEND_PORT FRONTEND_PORT BACKEND_DATA_PATH BACKEND_ENV_FILE \
+        BACKEND_CPUS BACKEND_MEM_LIMIT BACKEND_MEM_RESERVATION \
+        FRONTEND_CPUS FRONTEND_MEM_LIMIT FRONTEND_MEM_RESERVATION \
+        COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME; \
+  compose_env_file=\"$PWD/docker/compose.env\"; \
+  env_opt=\"\"; [ -f \"$compose_env_file\" ] && env_opt=\"--env-file $compose_env_file\"; \
   ${GIT_BIN} pull --ff-only && \
   case "%i" in \
     backend) ${DOCKER_BIN} compose ${env_opt} up -d --build --force-recreate backend ;; \
