@@ -626,7 +626,7 @@ onMounted(async () => {
 }
 .tree-tag {
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
   padding: 2px 6px;
   border: 1px solid #dbe3ef;

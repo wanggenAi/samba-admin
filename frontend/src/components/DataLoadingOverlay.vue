@@ -20,20 +20,14 @@ const props = defineProps({
 .data-loading-overlay {
   position: absolute;
   inset: 0;
+  display: grid;
+  place-items: center;
   background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(0.6px);
   z-index: 8;
 }
 
-/*
-  Keep the loading indicator centered in the viewport so it stays visually centered
-  even when the parent area is horizontally scrolled or browser zoom percentage changes.
-*/
 .data-loading-content {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -43,7 +37,7 @@ const props = defineProps({
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
-  max-width: calc(100vw - 32px);
+  max-width: calc(100% - 24px);
 }
 
 .data-loading-spinner {

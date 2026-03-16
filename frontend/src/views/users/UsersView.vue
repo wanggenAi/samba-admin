@@ -1437,7 +1437,7 @@ watch(totalPages, (next) => {
   border: 1px solid #dbe3ef;
   border-radius: 999px;
   padding: 0 7px;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.4;
   max-width: 150px;
   overflow: hidden;
@@ -1448,7 +1448,7 @@ watch(totalPages, (next) => {
   border: none;
   background: transparent;
   color: #2563eb;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   padding: 0 2px;
   cursor: pointer;
@@ -1621,7 +1621,7 @@ watch(totalPages, (next) => {
 }
 .tree-tag {
   border-radius: 999px;
-  font-size: 9px;
+  font-size: 11px;
   line-height: 1;
   padding: 2px 6px;
   border: 1px solid #dbe3ef;
