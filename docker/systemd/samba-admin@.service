@@ -20,20 +20,22 @@ Environment="DOCKER_BIN=/usr/bin/docker"
 # - samba-admin@frontend => start only frontend (without dependencies)
 # - samba-admin@all => start all services in compose
 ExecStart=/bin/bash -lc '\
+  env_opt=\"\"; [ -f docker/compose.env ] && env_opt=\"--env-file docker/compose.env\"; \
   case "%i" in \
-    backend) ${DOCKER_BIN} compose up -d backend ;; \
-    frontend) ${DOCKER_BIN} compose up -d --no-deps frontend ;; \
-    all) ${DOCKER_BIN} compose up -d ;; \
+    backend) ${DOCKER_BIN} compose ${env_opt} up -d backend ;; \
+    frontend) ${DOCKER_BIN} compose ${env_opt} up -d --no-deps frontend ;; \
+    all) ${DOCKER_BIN} compose ${env_opt} up -d ;; \
     *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
   esac'
 
 # Stop commands by instance name.
 # For "all" we use "down" to stop and remove the compose stack.
 ExecStop=/bin/bash -lc '\
+  env_opt=\"\"; [ -f docker/compose.env ] && env_opt=\"--env-file docker/compose.env\"; \
   case "%i" in \
-    backend) ${DOCKER_BIN} compose stop backend ;; \
-    frontend) ${DOCKER_BIN} compose stop frontend ;; \
-    all) ${DOCKER_BIN} compose down ;; \
+    backend) ${DOCKER_BIN} compose ${env_opt} stop backend ;; \
+    frontend) ${DOCKER_BIN} compose ${env_opt} stop frontend ;; \
+    all) ${DOCKER_BIN} compose ${env_opt} down ;; \
     *) echo "Invalid instance: %i (use backend|frontend|all)"; exit 1 ;; \
   esac'
 

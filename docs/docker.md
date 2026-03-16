@@ -10,7 +10,7 @@ This document covers:
 - Day-to-day operations (start/stop/logs/rebuild)
 - systemd management from any working directory
 - Fast runtime restart vs full deploy rebuild
-- Server-local configuration without Git pull conflicts
+- Unified local configuration in `docker/` env files
 - Common deployment pitfalls and exact recovery commands
 
 ## 1. Project Docker Files
@@ -22,14 +22,14 @@ samba-admin/
 │  ├─ frontend.Dockerfile
 │  ├─ backend.env.example
 │  ├─ backend.env                # local, ignored by Git
+│  ├─ compose.env.example
+│  ├─ compose.env                # local, ignored by Git
 │  ├─ nginx.conf
 │  └─ systemd/
 │     ├─ samba-admin@.service
 │     ├─ samba-admin-deploy@.service
 │     └─ install-systemd.sh
 ├─ docker-compose.yml            # baseline tracked in Git
-├─ docker-compose.override.yml   # local override, ignored by Git
-├─ docker-compose.override.example.yml
 └─ data/                         # persistent runtime data on host
 ```
 
@@ -74,10 +74,11 @@ sudo gpasswd -d $USER docker
 
 ## 3. First-Time Project Startup
 
-1. Create backend env file:
+1. Create local env files under `docker/`:
 
 ```bash
 cp docker/backend.env.example docker/backend.env
+cp docker/compose.env.example docker/compose.env
 ```
 
 2. Edit `docker/backend.env` and set at least:
@@ -87,10 +88,12 @@ cp docker/backend.env.example docker/backend.env
 - `LDAP_BIND_PASSWORD`
 - `LDAP_BASE_DN`
 
-3. Build and start all services:
+3. (Optional) Edit `docker/compose.env` for host ports, backend data path, and resource limits.
+
+4. Build and start all services:
 
 ```bash
-docker compose up -d --build
+docker compose --env-file docker/compose.env up -d --build
 ```
 
 Default endpoints:
@@ -104,32 +107,32 @@ Default endpoints:
 Start stack:
 
 ```bash
-docker compose up -d
+docker compose --env-file docker/compose.env up -d
 ```
 
 Stop stack:
 
 ```bash
-docker compose down
+docker compose --env-file docker/compose.env down
 ```
 
 Rebuild and restart:
 
 ```bash
-docker compose up -d --build --force-recreate
+docker compose --env-file docker/compose.env up -d --build --force-recreate
 ```
 
 View status:
 
 ```bash
-docker compose ps
+docker compose --env-file docker/compose.env ps
 ```
 
 View logs:
 
 ```bash
-docker compose logs -f backend
-docker compose logs -f frontend
+docker compose --env-file docker/compose.env logs -f backend
+docker compose --env-file docker/compose.env logs -f frontend
 ```
 
 Host-side log file:
@@ -160,110 +163,103 @@ Data persistence mapping:
 services:
   backend:
     volumes:
-      - ./data:/app/backend/app/data
+      - ${BACKEND_DATA_PATH:-./data}:/app/backend/app/data
 ```
 
 Backup important runtime data:
 - `data/rbac.json`
 - `data/logs/`
 
-## 6. Ports, Paths, And Env Paths
+## 6. Compose Variables In `docker/compose.env`
 
 ### 6.1 Change host ports
 
-Use host:container format in `ports`.
+Host ports are parameterized in `docker-compose.yml`:
+- backend: `${BACKEND_PORT:-8000}:8000`
+- frontend: `${FRONTEND_PORT:-5173}:80`
 
-Current:
-- backend: `8000:8000`
-- frontend: `5173:80`
+Set custom ports in `docker/compose.env`:
 
-Example:
-
-```yaml
-services:
-  backend:
-    ports:
-      - "18000:8000"
-
-  frontend:
-    ports:
-      - "15173:80"
+```bash
+BACKEND_PORT=18000
+FRONTEND_PORT=15173
 ```
 
 Apply:
 
 ```bash
-docker compose up -d --build
+docker compose --env-file docker/compose.env up -d --build
 ```
 
 ### 6.2 Change persistent data path
 
-Example:
+Set backend data mapping source path:
 
-```yaml
-services:
-  backend:
-    volumes:
-      - /srv/samba-admin/data:/app/backend/app/data
+```bash
+BACKEND_DATA_PATH=/srv/samba-admin/data
 ```
 
 Or project-relative:
 
-```yaml
-services:
-  backend:
-    volumes:
-      - ./runtime-data:/app/backend/app/data
+```bash
+BACKEND_DATA_PATH=./runtime-data
 ```
 
 ### 6.3 Change backend env file path
 
-Example:
-
-```yaml
-services:
-  backend:
-    env_file:
-      - /etc/samba-admin/backend.env
-```
-
-## 7. Server-Local Overrides (Recommended)
-
-To avoid server `git pull` conflicts, do not edit tracked `docker-compose.yml` directly.
-Put machine-specific settings in `docker-compose.override.yml`.
-
-Create local override:
+Set backend env file path:
 
 ```bash
-cp docker-compose.override.example.yml docker-compose.override.yml
+BACKEND_ENV_FILE=/etc/samba-admin/backend.env
 ```
 
-Use override for:
-- host ports
-- host bind paths
-- server-specific CPU/memory limits
+### 6.4 Change CPU and memory limits
 
-Compose auto-merges:
-- `docker-compose.yml` (Git baseline)
-- `docker-compose.override.yml` (local server config)
+Set resource values:
 
-Benefits:
-- stable `git pull --ff-only` during deploy
-- server-only config stays local
+```bash
+BACKEND_CPUS=1.50
+BACKEND_MEM_LIMIT=2g
+BACKEND_MEM_RESERVATION=1g
+FRONTEND_CPUS=0.75
+FRONTEND_MEM_LIMIT=768m
+FRONTEND_MEM_RESERVATION=384m
+```
+
+Apply:
+
+```bash
+docker compose --env-file docker/compose.env up -d
+```
+
+## 7. Configuration Policy (Current)
+
+Current project policy:
+- do not use `docker-compose.override.yml`
+- do not edit tracked `docker-compose.yml` on servers
+- put routine server-specific values only in:
+  - `docker/backend.env`
+  - `docker/compose.env`
+
+This keeps deployment behavior deterministic and reduces `git pull --ff-only` conflicts.
+
+If advanced compose layering is needed in the future, add override files then and document them explicitly.
 
 ## 8. CPU And Memory Limits
-
-Current limits are defined in `docker-compose.yml`.
 
 Parameters:
 - `cpus`: CPU quota (e.g. `"0.50"`, `"1.00"`, `"2.00"`)
 - `mem_limit`: hard memory cap (e.g. `"512m"`, `"1g"`)
 - `mem_reservation`: soft target under pressure (must be lower than `mem_limit`)
 
+These are configured via `docker/compose.env` variables:
+- `BACKEND_CPUS`, `BACKEND_MEM_LIMIT`, `BACKEND_MEM_RESERVATION`
+- `FRONTEND_CPUS`, `FRONTEND_MEM_LIMIT`, `FRONTEND_MEM_RESERVATION`
+
 Apply changes:
 
 ```bash
-docker compose up -d
+docker compose --env-file docker/compose.env up -d
 ```
 
 Verify effective limits:
@@ -284,6 +280,8 @@ Install units (idempotent; safe to run multiple times):
 Installed units:
 - `samba-admin@.service` (runtime service)
 - `samba-admin-deploy@.service` (deploy/rebuild task)
+
+Both units automatically use `docker/compose.env` when the file exists.
 
 ### 9.1 Runtime service (`samba-admin@...`)
 
@@ -395,7 +393,7 @@ If this manual pull fails, fix Git state first, then run deploy again.
 ### 10.4 Port already in use
 
 If host port conflicts:
-- change ports in `docker-compose.override.yml`
+- change `BACKEND_PORT` / `FRONTEND_PORT` in `docker/compose.env`
 - redeploy
 
 ### 10.5 Full recovery sequence
@@ -414,12 +412,12 @@ sudo systemctl status samba-admin-deploy@all --no-pager -l
 ## 11. Command Mapping Reference
 
 Runtime unit mapping:
-- `samba-admin@backend` -> `docker compose up -d backend`
-- `samba-admin@frontend` -> `docker compose up -d --no-deps frontend`
-- `samba-admin@all` -> `docker compose up -d`
-- `samba-admin@all` stop -> `docker compose down`
+- `samba-admin@backend` -> `docker compose [--env-file docker/compose.env] up -d backend`
+- `samba-admin@frontend` -> `docker compose [--env-file docker/compose.env] up -d --no-deps frontend`
+- `samba-admin@all` -> `docker compose [--env-file docker/compose.env] up -d`
+- `samba-admin@all` stop -> `docker compose [--env-file docker/compose.env] down`
 
 Deploy unit mapping:
-- `samba-admin-deploy@backend` -> `git pull --ff-only && docker compose up -d --build --force-recreate backend`
-- `samba-admin-deploy@frontend` -> `git pull --ff-only && docker compose up -d --build --force-recreate --no-deps frontend`
-- `samba-admin-deploy@all` -> `git pull --ff-only && docker compose up -d --build --force-recreate`
+- `samba-admin-deploy@backend` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate backend`
+- `samba-admin-deploy@frontend` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate --no-deps frontend`
+- `samba-admin-deploy@all` -> `git pull --ff-only && docker compose [--env-file docker/compose.env] up -d --build --force-recreate`

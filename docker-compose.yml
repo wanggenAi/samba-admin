@@ -5,24 +5,27 @@ services:
       dockerfile: docker/backend.Dockerfile
     container_name: samba-admin-backend
     env_file:
-      - docker/backend.env
+      # Backend app env file path configurable via BACKEND_ENV_FILE in docker/compose.env.
+      - "${BACKEND_ENV_FILE:-docker/backend.env}"
     ports:
-      - "8000:8000"
+      # Host port is configurable via BACKEND_PORT in docker/compose.env (default: 8000).
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
-      - ./data:/app/backend/app/data
+      # Backend persistent data path configurable via BACKEND_DATA_PATH in docker/compose.env.
+      - "${BACKEND_DATA_PATH:-./data}:/app/backend/app/data"
     restart: unless-stopped
 
     # CPU limit for backend container.
     # Examples: "0.50" = half core, "1.00" = one core, "2.00" = two cores.
-    cpus: "1.00"
+    cpus: "${BACKEND_CPUS:-1.00}"
 
     # Hard memory limit for backend container.
     # Increase if backend workloads need more RAM.
-    mem_limit: "1g"
+    mem_limit: "${BACKEND_MEM_LIMIT:-1g}"
 
     # Soft memory reservation (best-effort target under pressure).
     # Keep this lower than mem_limit.
-    mem_reservation: "512m"
+    mem_reservation: "${BACKEND_MEM_RESERVATION:-512m}"
 
   frontend:
     build:
@@ -32,14 +35,15 @@ services:
     depends_on:
       - backend
     ports:
-      - "5173:80"
+      # Host port is configurable via FRONTEND_PORT in docker/compose.env (default: 5173).
+      - "${FRONTEND_PORT:-5173}:80"
     restart: unless-stopped
 
     # CPU limit for frontend (nginx) container.
-    cpus: "0.50"
+    cpus: "${FRONTEND_CPUS:-0.50}"
 
     # Hard memory limit for frontend container.
-    mem_limit: "512m"
+    mem_limit: "${FRONTEND_MEM_LIMIT:-512m}"
 
     # Soft memory reservation for frontend container.
-    mem_reservation: "256m"
+    mem_reservation: "${FRONTEND_MEM_RESERVATION:-256m}"
