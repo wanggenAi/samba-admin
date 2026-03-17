@@ -17,7 +17,7 @@ from app.services.users.user_import_export_service import (
     _decode_legacy_text,
     _entry_attr,
     _extract_group_token,
-    _extract_name_lines,
+    _extract_import_records,
     _normalize_dn,
     _normalize_for_compare,
     _normalize_spaces,
@@ -80,6 +80,7 @@ class _FakeImportSvc:
     def __init__(self) -> None:
         self.created = []
         self.group_added = []
+        self.profile_updates = []
 
     @contextmanager
     def connection(self):
@@ -97,6 +98,28 @@ class _FakeImportSvc:
 
     def add_user_to_group(self, _conn, user_dn, group_dn):
         self.group_added.append((user_dn, group_dn))
+
+    def update_user_profile(
+        self,
+        conn,
+        user_dn,
+        student_id,
+        first_name,
+        last_name,
+        display_name,
+        paid_flag,
+    ):
+        self.profile_updates.append(
+            {
+                "user_dn": user_dn,
+                "student_id": student_id,
+                "first_name": first_name,
+                "last_name": last_name,
+                "display_name": display_name,
+                "paid_flag": paid_flag,
+            }
+        )
+        return ["displayName", "givenName", "sn", "employeeID", "employeeType"]
 
 
 class UserServicesTests(unittest.TestCase):
@@ -140,19 +163,29 @@ class UserServicesTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _extract_group_token("Иванов Иван")
 
-    def test_extract_name_lines_filters_noise_and_budget_lines(self) -> None:
+    def test_extract_import_records_parses_real_block_format(self) -> None:
         text = "\n".join(
             [
-                "Группа МС-63/24",
-                "П",
-                "Бюджет",
-                "Иванов Иван",
-                "Test User",
-                "Петров Петр",
+                "ФЭИС 3 курс",
+                "группа Э-62",
+                "5.",
+                "Гутик Павел Олегович",
+                "$",
+                "230385",
+                "18.",
+                "Мисак Артём Леонидович",
+                "$",
+                "230398",
             ]
         )
-        lines = _extract_name_lines(text)
-        self.assertEqual(lines, [(4, "Иванов Иван"), (6, "Петров Петр")])
+        records = _extract_import_records(text)
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0].raw_line, "Гутик Павел Олегович")
+        self.assertEqual(records[0].paid_flag, "$")
+        self.assertEqual(records[0].student_id, "230385")
+        self.assertEqual(records[1].raw_line, "Мисак Артём Леонидович")
+        self.assertEqual(records[1].paid_flag, "$")
+        self.assertEqual(records[1].student_id, "230398")
 
     def test_user_name_matches_and_resolve_import_username(self) -> None:
         class _ConnForName:
@@ -226,9 +259,17 @@ class UserServicesTests(unittest.TestCase):
         raw_text = "\n".join(
             [
                 "Группа МС-63/24",
+                "1.",
                 "Иванов Иван",
+                "$",
+                "230385",
+                "2.",
                 "Петров",
+                "$",
+                "230399",
+                "3.",
                 "Сидоров Сидор",
+                "230400",
             ]
         ).encode("utf-8")
 
@@ -247,6 +288,39 @@ class UserServicesTests(unittest.TestCase):
         self.assertEqual(statuses, ["created", "failed", "skipped"])
         self.assertEqual(len(fake_svc.created), 1)
         self.assertEqual(len(fake_svc.group_added), 1)
+        self.assertEqual(len(fake_svc.profile_updates), 1)
+        self.assertEqual(fake_svc.profile_updates[0]["student_id"], "230385")
+        self.assertEqual(fake_svc.profile_updates[0]["paid_flag"], "$")
+
+    def test_import_users_allows_row_when_student_id_missing(self) -> None:
+        fake_svc = _FakeImportSvc()
+        raw_text = "\n".join(
+            [
+                "Группа ИИ-2025",
+                "1.",
+                "Орлов Дмитрий",
+                "$",
+                "2.",
+                "Федорова Ольга",
+                "230502",
+            ]
+        ).encode("utf-8")
+
+        with patch("app.services.users.user_import_export_service.get_ldap_service", return_value=fake_svc):
+            with patch(
+                "app.services.users.user_import_export_service._resolve_import_username",
+                return_value=("fedool", False),
+            ):
+                result = import_users_from_legacy_txt([("ii.txt", raw_text)], default_group_cn="Students", password_length=10)
+
+        self.assertEqual(result.total_lines, 2)
+        self.assertEqual(result.created, 2)
+        self.assertEqual(result.failed, 0)
+        self.assertEqual(result.results[0].status, "created")
+        self.assertEqual(result.results[1].status, "created")
+        self.assertIsNone(fake_svc.profile_updates[0]["student_id"])
+        self.assertEqual(fake_svc.profile_updates[0]["paid_flag"], "$")
+        self.assertEqual(fake_svc.profile_updates[1]["student_id"], "230502")
 
     def test_delete_user_rejects_blank_and_protected(self) -> None:
         with self.assertRaises(HTTPException) as ctx_blank:

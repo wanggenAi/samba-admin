@@ -657,7 +657,7 @@ class LdapService:
         self,
         conn: ldap3.Connection,
         user_dn: str,
-        student_id: str,
+        student_id: Optional[str],
         first_name: str,
         last_name: str,
         display_name: Optional[str],
@@ -668,13 +668,18 @@ class LdapService:
             "displayName": [(ldap3.MODIFY_REPLACE, [resolved_display_name])],
             "givenName": [(ldap3.MODIFY_REPLACE, [first_name])],
             "sn": [(ldap3.MODIFY_REPLACE, [last_name])],
-            "employeeID": [(ldap3.MODIFY_REPLACE, [student_id])],
         }
+
+        safe_student_id = (student_id or "").strip()
+        if safe_student_id:
+            base_changes["employeeID"] = [(ldap3.MODIFY_REPLACE, [safe_student_id])]
 
         if not conn.modify(user_dn, base_changes):
             raise LDAPException(f"update user attributes failed: {conn.result}")
 
-        updated: List[str] = ["displayName", "givenName", "sn", "employeeID"]
+        updated: List[str] = ["displayName", "givenName", "sn"]
+        if safe_student_id:
+            updated.append("employeeID")
 
         if paid_flag == "$":
             if not conn.modify(user_dn, {"employeeType": [(ldap3.MODIFY_REPLACE, ["$"])]}):

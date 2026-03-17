@@ -5,6 +5,7 @@ import io
 import re
 import secrets
 import string
+from dataclasses import dataclass
 from typing import Iterable, Optional
 
 import ldap3
@@ -26,6 +27,8 @@ GROUP_CODE_MAP = {
 }
 # Keep old grep-style behavior: pure Russian letters + spaces only.
 RUS_NAME_LINE_RE = re.compile(r"^[А-Яа-яЁё ]+$")
+INDEX_LINE_RE = re.compile(r"^\d+[.)]$")
+STUDENT_ID_LINE_RE = re.compile(r"^\d{4,32}$")
 
 # Basic Russian transliteration map for deterministic username generation.
 _RU_LAT_MAP = {
@@ -168,6 +171,83 @@ def _extract_name_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+@dataclass(frozen=True)
+class _LegacyImportRecord:
+    line_no: int
+    raw_line: str
+    student_id: Optional[str]
+    paid_flag: Optional[str]
+
+
+def _is_group_line(value: str) -> bool:
+    return "группа" in (value or "").lower()
+
+
+def _is_name_line(value: str) -> bool:
+    line = _normalize_spaces(value)
+    if not line:
+        return False
+    if _is_group_line(line):
+        return False
+    if line in {"П", "Бюджет"}:
+        return False
+    if not RUS_NAME_LINE_RE.fullmatch(line):
+        return False
+    return True
+
+
+def _extract_import_records(text: str) -> list[_LegacyImportRecord]:
+    dense_lines: list[tuple[int, str]] = []
+    for idx, raw in enumerate(text.splitlines(), start=1):
+        line = _normalize_spaces(raw)
+        if not line:
+            continue
+        dense_lines.append((idx, line))
+
+    out: list[_LegacyImportRecord] = []
+    i = 0
+    while i < len(dense_lines):
+        line_no, line = dense_lines[i]
+        if not _is_name_line(line):
+            i += 1
+            continue
+
+        paid_flag: Optional[str] = None
+        student_id: Optional[str] = None
+        j = i + 1
+        while j < len(dense_lines):
+            _, token = dense_lines[j]
+            if _is_name_line(token) or _is_group_line(token):
+                break
+            if INDEX_LINE_RE.fullmatch(token):
+                j += 1
+                continue
+            if token == "$":
+                paid_flag = "$"
+                j += 1
+                continue
+            if token in {"П", "Бюджет"}:
+                j += 1
+                continue
+            if STUDENT_ID_LINE_RE.fullmatch(token):
+                student_id = token
+                j += 1
+                continue
+            j += 1
+
+        out.append(
+            _LegacyImportRecord(
+                line_no=line_no,
+                raw_line=line,
+                student_id=student_id,
+                paid_flag=paid_flag,
+            )
+        )
+        i = j
+
+    return out
+
+
 def _split_person_name(raw_line: str) -> tuple[str, str]:
     parts = [x for x in _normalize_spaces(raw_line).split(" ") if x]
     if len(parts) < 2:
@@ -272,7 +352,7 @@ def import_users_from_legacy_txt(
                 group_code, group_number = _parse_group_parts(group_token)
                 ou_path = ["Students", group_code, group_number]
                 parent_dn = svc.ensure_ou_path(conn, ou_path)
-                name_lines = _extract_name_lines(text)
+                records = _extract_import_records(text)
             except (ValueError, HTTPException, LDAPException) as err:
                 failed += 1
                 results.append(
@@ -286,10 +366,14 @@ def import_users_from_legacy_txt(
                 )
                 continue
 
-            for line_no, raw_line in name_lines:
+            for record in records:
                 total_lines += 1
+                line_no = record.line_no
+                raw_line = record.raw_line
                 try:
                     first_name, last_name = _split_person_name(raw_line)
+                    student_id = _normalize_spaces(record.student_id or "") or None
+
                     seed = _build_legacy_username_seed(last_name=last_name, first_name=first_name)
                     username, already_exists = _resolve_import_username(
                         conn,
@@ -325,6 +409,15 @@ def import_users_from_legacy_txt(
                         first_name=first_name,
                         last_name=last_name,
                         display_name=f"{first_name} {last_name}".strip(),
+                    )
+                    svc.update_user_profile(
+                        conn=conn,
+                        user_dn=user_dn,
+                        student_id=student_id,
+                        first_name=first_name,
+                        last_name=last_name,
+                        display_name=f"{first_name} {last_name}".strip(),
+                        paid_flag=record.paid_flag,
                     )
                     if group_dn:
                         svc.add_user_to_group(conn, user_dn, group_dn)
