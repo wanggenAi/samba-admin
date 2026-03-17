@@ -129,6 +129,10 @@ If advanced compose layering is needed later, add it as a separate documented ch
 - `BACKEND_MEM_RESERVATION` (default `512m`)
 - `BACKEND_LOG_MAX_SIZE` (default `10m`)
 - `BACKEND_LOG_MAX_FILE` (default `3`)
+- `BACKEND_HEALTH_INTERVAL` (default `3s`)
+- `BACKEND_HEALTH_TIMEOUT` (default `3s`)
+- `BACKEND_HEALTH_RETRIES` (default `5`)
+- `BACKEND_HEALTH_START_PERIOD` (default `3s`)
 - `FRONTEND_CPUS` (default `0.50`)
 - `FRONTEND_MEM_LIMIT` (default `512m`)
 - `FRONTEND_MEM_RESERVATION` (default `256m`)
@@ -147,6 +151,10 @@ BACKEND_MEM_LIMIT=1g
 BACKEND_MEM_RESERVATION=512m
 BACKEND_LOG_MAX_SIZE=10m
 BACKEND_LOG_MAX_FILE=3
+BACKEND_HEALTH_INTERVAL=3s
+BACKEND_HEALTH_TIMEOUT=3s
+BACKEND_HEALTH_RETRIES=5
+BACKEND_HEALTH_START_PERIOD=3s
 FRONTEND_CPUS=0.50
 FRONTEND_MEM_LIMIT=512m
 FRONTEND_MEM_RESERVATION=256m
@@ -161,7 +169,8 @@ docker compose --env-file docker/compose.env up -d --force-recreate
 ```
 
 Notes:
-- Full-stack startup now waits for backend health (`/health`) before frontend starts.
+- Full-stack startup is configured for speed: frontend waits for backend `service_started` (not `service_healthy`).
+- Backend healthcheck timing is configurable via `BACKEND_HEALTH_*` variables.
 - Container logs use rotation (`max-size` + `max-file`) to prevent disk growth from unbounded Docker json logs.
 
 ## 7. Daily Operations

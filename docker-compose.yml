@@ -39,10 +39,11 @@ services:
     # Backend health endpoint check used by frontend dependency condition.
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
+      # Healthcheck timing can be tuned in docker/compose.env.
+      interval: "${BACKEND_HEALTH_INTERVAL:-3s}"
+      timeout: "${BACKEND_HEALTH_TIMEOUT:-3s}"
+      retries: ${BACKEND_HEALTH_RETRIES:-5}
+      start_period: "${BACKEND_HEALTH_START_PERIOD:-3s}"
 
   frontend:
     build:
@@ -50,9 +51,10 @@ services:
       dockerfile: docker/frontend.Dockerfile
     container_name: samba-admin-frontend
     depends_on:
-      # Wait until backend passes healthcheck when starting the full stack.
+      # Fast-start mode: only require backend container to be started.
+      # Healthcheck is kept for runtime monitoring/troubleshooting.
       backend:
-        condition: service_healthy
+        condition: service_started
     ports:
       # Host port is configurable via FRONTEND_PORT in docker/compose.env (default: 5173).
       - "${FRONTEND_PORT:-5173}:80"
