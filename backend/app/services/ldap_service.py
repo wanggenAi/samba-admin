@@ -928,7 +928,19 @@ class LdapService:
                     filtered.append(u)
             users = filtered
 
-        users.sort(key=lambda u: ((u.sAMAccountName or "").lower(), (u.displayName or "").lower(), (u.dn or "").lower()))
+        # Default user list order: most recently changed/created first.
+        # When timestamps are equal or missing, fall back to stable lexical keys.
+        users.sort(
+            key=lambda u: (
+                -max(
+                    self._parse_ldap_timestamp(u.whenChanged),
+                    self._parse_ldap_timestamp(u.whenCreated),
+                ),
+                (u.sAMAccountName or "").lower(),
+                (u.displayName or "").lower(),
+                (u.dn or "").lower(),
+            )
+        )
         total = len(users)
         start = (safe_page - 1) * safe_page_size
         page_users = users[start : start + safe_page_size]

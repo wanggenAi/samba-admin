@@ -23,7 +23,13 @@ class _Conn:
         return True
 
 
-def _make_user(dn: str, username: str, last_logon: str | None = None):
+def _make_user(
+    dn: str,
+    username: str,
+    last_logon: str | None = None,
+    when_changed: str | None = None,
+    when_created: str | None = None,
+):
     return type(
         "U",
         (),
@@ -36,8 +42,8 @@ def _make_user(dn: str, username: str, last_logon: str | None = None):
             "sn": "User",
             "employeeID": None,
             "employeeType": None,
-            "whenCreated": None,
-            "whenChanged": None,
+            "whenCreated": when_created,
+            "whenChanged": when_changed,
             "lastLogon": last_logon,
             "lastLogoff": None,
             "model_dump": lambda self=None: {
@@ -49,8 +55,8 @@ def _make_user(dn: str, username: str, last_logon: str | None = None):
                 "sn": "User",
                 "employeeID": None,
                 "employeeType": None,
-                "whenCreated": None,
-                "whenChanged": None,
+                "whenCreated": when_created,
+                "whenChanged": when_changed,
                 "lastLogon": last_logon,
                 "lastLogoff": None,
             },
@@ -112,6 +118,37 @@ class LdapServiceAdvancedTests(unittest.TestCase):
 
         self.assertEqual(result["total"], 0)
         self.assertEqual(result["items"], [])
+
+    def test_list_users_page_orders_by_recent_change_desc(self) -> None:
+        users = [
+            _make_user(
+                "CN=u-old,OU=A,DC=ex,DC=com",
+                "u-old",
+                when_changed="20240101000000.0Z",
+            ),
+            _make_user(
+                "CN=u-mid,OU=A,DC=ex,DC=com",
+                "u-mid",
+                when_created="20241201000000.0Z",
+            ),
+            _make_user(
+                "CN=u-new,OU=A,DC=ex,DC=com",
+                "u-new",
+                when_changed="20250101000000.0Z",
+            ),
+        ]
+
+        @contextmanager
+        def fake_connection():
+            yield _Conn()
+
+        with patch.object(self.svc, "list_users", return_value=users):
+            with patch.object(self.svc, "connection", side_effect=fake_connection):
+                with patch.object(self.svc, "list_user_groups", return_value=[]):
+                    result = self.svc.list_users_page(page=1, page_size=10, view="list")
+
+        ordered_usernames = [item["sAMAccountName"] for item in result["items"]]
+        self.assertEqual(ordered_usernames, ["u-new", "u-mid", "u-old"])
 
     def test_build_ou_tree_with_users(self) -> None:
         ou_entries = [
